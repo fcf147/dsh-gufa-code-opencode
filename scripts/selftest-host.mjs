@@ -323,6 +323,23 @@ try {
   const restoredDoc = await call(router, 'fs.read', { root, path: 'src/main.ts' })
   check('discard restores tracked file to HEAD', restoredDoc.content === 'const answer = 42\n', JSON.stringify(restoredDoc.content))
 
+  /* 撤销全部：未跟踪新文件删除 + 已跟踪改动还原 */
+  await call(router, 'fs.create', { root, path: 'src/temp-all.ts', kind: 'file' })
+  await call(router, 'fs.write', { root, path: 'src/temp-all.ts', content: 'to be removed\n' })
+  const allDoc = await call(router, 'fs.read', { root, path: 'src/main.ts' })
+  await call(router, 'fs.write', { root, path: 'src/main.ts', content: 'local edit\n', expectedRevision: allDoc.revision })
+  const discardedAll = await call(router, 'git.discardAll', { root })
+  check('discardAll reports removed untracked', Array.isArray(discardedAll.removed) && discardedAll.removed.includes('src/temp-all.ts'), JSON.stringify(discardedAll.removed))
+  let allUntrackedGone = false
+  try {
+    await call(router, 'fs.read', { root, path: 'src/temp-all.ts' })
+  } catch {
+    allUntrackedGone = true
+  }
+  const restoredMain = await call(router, 'fs.read', { root, path: 'src/main.ts' })
+  check('discardAll deletes untracked files', allUntrackedGone)
+  check('discardAll restores tracked files', restoredMain.content === 'const answer = 42\n', JSON.stringify(restoredMain.content))
+
   const gitSearch = await call(router, 'fs.search', { root, query: 'answer' })
   check('search uses git file list', gitSearch.viaGit === true, String(gitSearch.viaGit))
   check('search finds committed file', gitSearch.files.some((file) => file.path === 'src/main.ts'))

@@ -356,15 +356,25 @@ export function register(router, env) {
     return { ok: true }
   })
 
-  /** 撤销所有（未暂存 + 已暂存）的已跟踪文件改动；不删除未跟踪文件。 */
+  /** 撤销所有改动：已跟踪文件还原到 HEAD，未跟踪的新文件从工作区删除。 */
   router.method('git.discardAll', async (body) => {
     const { root } = await repoContext(env, body)
+    /* 先删除未跟踪文件（git restore 对它们无效）；--exclude-standard 不会碰 .gitignore 忽略的文件 */
+    const removed = []
+    const untracked = (await git(root, ['ls-files', '--others', '--exclude-standard', '-z']).catch(() => '')).split('\u0000')
+    for (const path of untracked) {
+      if (path === '' || path.includes('..') || path.startsWith('/')) continue
+      const target = resolve(root, path)
+      if (target === root || !target.startsWith(root + sep)) continue
+      await rm(target, { recursive: true, force: true })
+      removed.push(path)
+    }
     const staged = await git(root, ['diff', '--cached', '--name-only']).catch(() => '')
     if (staged.trim() !== '') await git(root, ['restore', '--staged', '--', '.'], 60_000)
     await git(root, ['restore', '--worktree', '--', '.'], 60_000).catch(async () => {
       await git(root, ['checkout', '--', '.'], 60_000)
     })
-    return { ok: true }
+    return { ok: true, removed }
   })
 
   router.method('git.diff', async (body) => {

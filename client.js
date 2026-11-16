@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.205'
+G.BUILD = '1.3.206'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -293,8 +293,8 @@ const DICT_ZH = {
   'diff.next': '下一处差异',
   'diff.revertFile': '还原文件',
   'diff.stageFile': '暂存文件',
-  'git.discardAll': '撤销所有未暂存改动',
-  'git.discardConfirm': '再点一次确认撤销（未跟踪文件不会被删除）',
+  'git.discardAll': '撤销所有改动（含未跟踪新文件）',
+  'git.discardConfirm': '再点一次确认：未跟踪的新文件也会被删除',
   'git.committed': '已提交',
   'git.refresh': '刷新',
   'git.staged': '已暂存',
@@ -548,8 +548,8 @@ const DICT_EN = {
   'diff.next': 'Next change',
   'diff.revertFile': 'Revert file',
   'diff.stageFile': 'Stage file',
-  'git.discardAll': 'Discard all unstaged changes',
-  'git.discardConfirm': 'Click again to confirm (untracked files are kept)',
+  'git.discardAll': 'Discard all changes (including untracked files)',
+  'git.discardConfirm': 'Click again to confirm: untracked files will be deleted',
   'git.committed': 'Committed',
   'git.refresh': 'Refresh',
   'git.staged': 'Staged',
