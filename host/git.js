@@ -159,7 +159,9 @@ async function findGitRepos(root) {
         isRoot: current.rel === '',
       })
     }
-    if (current.depth >= 5) continue
+    /* 只扫工作区根目录 + 直接子目录：用户通常把 Git 项目直接放在工作区下面，
+       不再往深处递归，避免大目录扫描变慢。 */
+    if (current.depth >= 1) continue
     for (const entry of entries) {
       if (entry.isDirectory() !== true) continue
       if (entry.name.startsWith('.') || REPO_SKIP_DIRS.has(entry.name)) continue

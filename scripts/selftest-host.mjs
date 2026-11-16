@@ -271,7 +271,7 @@ try {
   check('unstaged file not in commit', unstagedHead.missing === true)
 
   /* 多仓库：工作区根目录仓库 + 子目录仓库分别检测、分别提交 */
-  const nestedRepo = join(projectDir, 'packages', 'lib')
+  const nestedRepo = join(projectDir, 'nested-lib')
   mkdirSync(nestedRepo, { recursive: true })
   execFileSync('git', ['init', '-q'], { cwd: nestedRepo })
   execFileSync('git', ['config', 'user.email', 'selftest@example.com'], { cwd: nestedRepo })
@@ -281,8 +281,8 @@ try {
   execFileSync('git', ['commit', '-qm', 'init nested'], { cwd: nestedRepo })
   const repoList = await call(router, 'git.repos', { root })
   check('git.repos lists root repo', repoList.repos.some((repo) => repo.rel === '' && repo.isRoot === true), JSON.stringify(repoList.repos.map((repo) => repo.rel)))
-  check('git.repos lists nested repo', repoList.repos.some((repo) => repo.rel === 'packages/lib'), JSON.stringify(repoList.repos.map((repo) => repo.rel)))
-  const nested = repoList.repos.find((repo) => repo.rel === 'packages/lib')
+  check('git.repos lists direct child repo', repoList.repos.some((repo) => repo.rel === 'nested-lib'), JSON.stringify(repoList.repos.map((repo) => repo.rel)))
+  const nested = repoList.repos.find((repo) => repo.rel === 'nested-lib')
   const nestedStatus = await call(router, 'git.status', { root, repo: nested.path })
   check('nested repo status isolated', nestedStatus.isGit === true && nestedStatus.changes.length === 0, JSON.stringify(nestedStatus.changes))
   writeFileSync(join(nestedRepo, 'index.ts'), 'export const nested = 2\n')
@@ -293,7 +293,7 @@ try {
   const nestedClean = await call(router, 'git.status', { root, repo: nested.path })
   check('nested repo commits independently', nestedClean.changes.length === 0, JSON.stringify(nestedClean.changes))
   const rootStillDirty = await call(router, 'git.status', { root })
-  check('root repo unaffected by nested commit', rootStillDirty.isGit === true && !rootStillDirty.changes.some((change) => change.path === 'packages/lib/index.ts'), JSON.stringify(rootStillDirty.changes))
+  check('root repo unaffected by nested commit', rootStillDirty.isGit === true && !rootStillDirty.changes.some((change) => change.path === 'nested-lib/index.ts'), JSON.stringify(rootStillDirty.changes))
   let outsideRepoRejected = false
   try {
     await call(router, 'git.status', { root, repo: join(sandbox, 'outside-repo') })
