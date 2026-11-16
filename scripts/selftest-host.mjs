@@ -302,6 +302,27 @@ try {
   }
   check('git rejects repo outside workspace', outsideRepoRejected)
 
+  /* 未跟踪新文件：还原 = 删除文件；已跟踪文件：还原 = 恢复 HEAD 内容 */
+  await call(router, 'fs.create', { root, path: 'src/temp-untracked.ts', kind: 'file' })
+  await call(router, 'fs.write', { root, path: 'src/temp-untracked.ts', content: 'temporary\n' })
+  const untrackedBefore = await call(router, 'git.status', { root })
+  check('untracked file listed', untrackedBefore.changes.some((change) => change.path === 'src/temp-untracked.ts' && change.untracked === true), JSON.stringify(untrackedBefore.changes))
+  const discardedUntracked = await call(router, 'git.discard', { root, paths: ['src/temp-untracked.ts'] })
+  check('discard reports removed untracked', Array.isArray(discardedUntracked.removed) && discardedUntracked.removed.includes('src/temp-untracked.ts'), JSON.stringify(discardedUntracked.removed))
+  let untrackedGone = false
+  try {
+    await call(router, 'fs.read', { root, path: 'src/temp-untracked.ts' })
+  } catch {
+    untrackedGone = true
+  }
+  const untrackedAfter = await call(router, 'git.status', { root })
+  check('discard deletes untracked file', untrackedGone && !untrackedAfter.changes.some((change) => change.path === 'src/temp-untracked.ts'))
+  const trackedDoc = await call(router, 'fs.read', { root, path: 'src/main.ts' })
+  await call(router, 'fs.write', { root, path: 'src/main.ts', content: 'changed locally\n', expectedRevision: trackedDoc.revision })
+  await call(router, 'git.discard', { root, paths: ['src/main.ts'] })
+  const restoredDoc = await call(router, 'fs.read', { root, path: 'src/main.ts' })
+  check('discard restores tracked file to HEAD', restoredDoc.content === 'const answer = 42\n', JSON.stringify(restoredDoc.content))
+
   const gitSearch = await call(router, 'fs.search', { root, query: 'answer' })
   check('search uses git file list', gitSearch.viaGit === true, String(gitSearch.viaGit))
   check('search finds committed file', gitSearch.files.some((file) => file.path === 'src/main.ts'))

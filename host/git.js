@@ -4,7 +4,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { readdir } from 'node:fs/promises'
+import { readdir, rm } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import { ApiError, badRequest } from './context.js'
 
@@ -312,17 +312,33 @@ export function register(router, env) {
     return { text: binary ? '' : text, missing, binary, tooLarge: false }
   })
 
-  /** 撤销指定文件的未暂存改动（git restore --worktree，等价 VS Code 行内还原）。 */
+  /** 撤销指定文件的未暂存改动；未跟踪的新文件没有 HEAD 版本，直接删除文件。 */
   router.method('git.discard', async (body) => {
     const { root } = await repoContext(env, body)
     const paths = Array.isArray(body.paths) ? body.paths.filter((item) => typeof item === 'string' && item !== '' && !item.includes('..') && !item.startsWith('/')) : []
     if (paths.length === 0) throw badRequest('paths is required')
-    try {
-      await git(root, ['restore', '--worktree', '--', ...paths], 60_000)
-    } catch {
-      await git(root, ['checkout', '--', ...paths], 60_000)
+    const removed = []
+    const tracked = []
+    for (const path of paths) {
+      const isTracked = (await git(root, ['ls-files', '--error-unmatch', '--', path]).catch(() => '')).trim() !== ''
+      if (isTracked) {
+        tracked.push(path)
+        continue
+      }
+      /* 未跟踪文件：git restore/checkout 都会报 pathspec did not match，直接删除工作区文件 */
+      const target = resolve(root, path)
+      if (target !== root && !target.startsWith(root + sep)) throw badRequest('path is invalid')
+      await rm(target, { recursive: true, force: true })
+      removed.push(path)
     }
-    return { ok: true }
+    if (tracked.length > 0) {
+      try {
+        await git(root, ['restore', '--worktree', '--', ...tracked], 60_000)
+      } catch {
+        await git(root, ['checkout', '--', ...tracked], 60_000)
+      }
+    }
+    return { ok: true, removed }
   })
 
   /** 撤回上一次提交，改动保留在暂存区（等价 git reset --soft HEAD~1；首个提交用 update-ref）。 */

@@ -1434,8 +1434,12 @@ G.GitRepoDetail = function GitRepoDetail(props) {
                     pending,
                     onOpen: () => props.onOpenDiff?.(changeWithRepo(change)),
                     onContextMenu: (event, rowChange) => setRowMenu({ ...clampMenuPosition(event.clientX, event.clientY, 200, 200), change: rowChange }),
-                    onRevert: () => void act(async () => G.api('git.discard', { root, repo: repoParam, paths: [change.path] })),
-                    revertLabel: t('git.discardFile'),
+                    onRevert: () => {
+                      if (change.untracked === true
+                        && window.confirm(t('git.deleteUntrackedConfirm').replace('{path}', change.path)) !== true) return
+                      void act(async () => G.api('git.discard', { root, repo: repoParam, paths: [change.path] }))
+                    },
+                    revertLabel: change.untracked === true ? t('git.deleteUntrackedFile') : t('git.discardFile'),
                     onAction: () => void act(async () => G.api('git.stage', { root, repo: repoParam, paths: [change.path] })),
                     actionLabel: t('git.stage'),
                     actionIcon: 'plus',
@@ -1509,9 +1513,14 @@ G.GitRepoDetail = function GitRepoDetail(props) {
           rowMenu.change.staged !== true
             ? h(G.MenuItem, {
                 icon: 'undo',
-                label: t('git.discardFile'),
+                label: rowMenu.change.untracked === true ? t('git.deleteUntrackedFile') : t('git.discardFile'),
                 danger: true,
-                onClick: menuAction(() => void act(async () => { await G.api('git.discard', { root, repo: repoParam, paths: [rowMenu.change.path] }) })),
+                onClick: menuAction(() => {
+                  const change = rowMenu.change
+                  if (change.untracked === true
+                    && window.confirm(t('git.deleteUntrackedConfirm').replace('{path}', change.path)) !== true) return
+                  void act(async () => { await G.api('git.discard', { root, repo: repoParam, paths: [change.path] }) })
+                }),
               })
             : null,
           h(G.MenuItem, { icon: 'files', label: t('git.copyPath'), onClick: menuAction(() => copyText(rowMenu.change.path)) }),
