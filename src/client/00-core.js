@@ -1827,7 +1827,7 @@ html[data-platform=darwin][data-fullscreen] .gufa-titlebar{height:44px;padding-l
 .gufa-git-change:hover{background:var(--gufa-hover)}
 .gufa-git-status{width:15px;flex:0 0 auto;text-align:center;font-weight:700;font-size:11px;color:var(--gufa-accent)}
 .gufa-git-status[data-kind="D"]{color:var(--dsw-alias-state-error-primary)}
-.gufa-git-status[data-kind="??"]{color:var(--dsw-alias-state-success-primary)}
+.gufa-git-status[data-kind="U"],.gufa-git-status[data-kind="??"]{color:var(--dsw-alias-state-success-primary)}
 .gufa-git-path{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;direction:rtl;text-align:left}
 .gufa-git-repos{border-bottom:1px solid var(--gufa-border);padding:4px 6px 6px;flex:0 0 auto}
 .gufa-git-repos-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;font-size:11px;font-weight:600;color:var(--gufa-text-dim)}

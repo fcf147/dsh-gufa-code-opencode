@@ -1679,6 +1679,8 @@ G.GitPanel = function GitPanel(props) {
 
 G.GitChangeRow = function GitChangeRow(props) {
   const change = props.change
+  /* 未跟踪文件在 git porcelain 里是 ??，面板里显示成更直观的 U（Untracked） */
+  const displayStatus = change.untracked === true || change.status === '??' ? 'U' : change.status
   return h(
     'div',
     {
@@ -1692,7 +1694,7 @@ G.GitChangeRow = function GitChangeRow(props) {
       },
       style: { cursor: 'pointer' },
     },
-    h('span', { className: 'gufa-git-status', 'data-kind': change.status }, change.status),
+    h('span', { className: 'gufa-git-status', 'data-kind': displayStatus }, displayStatus),
     h('span', { className: 'gufa-git-path', style: { flex: '1 1 auto' } }, change.path),
     props.staged !== true && typeof props.onRevert === 'function'
       ? h(

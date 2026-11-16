@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.204'
+G.BUILD = '1.3.205'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -1835,7 +1835,7 @@ html[data-platform=darwin][data-fullscreen] .gufa-titlebar{height:44px;padding-l
 .gufa-git-change:hover{background:var(--gufa-hover)}
 .gufa-git-status{width:15px;flex:0 0 auto;text-align:center;font-weight:700;font-size:11px;color:var(--gufa-accent)}
 .gufa-git-status[data-kind="D"]{color:var(--dsw-alias-state-error-primary)}
-.gufa-git-status[data-kind="??"]{color:var(--dsw-alias-state-success-primary)}
+.gufa-git-status[data-kind="U"],.gufa-git-status[data-kind="??"]{color:var(--dsw-alias-state-success-primary)}
 .gufa-git-path{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;direction:rtl;text-align:left}
 .gufa-git-repos{border-bottom:1px solid var(--gufa-border);padding:4px 6px 6px;flex:0 0 auto}
 .gufa-git-repos-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;font-size:11px;font-weight:600;color:var(--gufa-text-dim)}
@@ -9682,6 +9682,8 @@ G.GitPanel = function GitPanel(props) {
 
 G.GitChangeRow = function GitChangeRow(props) {
   const change = props.change
+  /* 未跟踪文件在 git porcelain 里是 ??，面板里显示成更直观的 U（Untracked） */
+  const displayStatus = change.untracked === true || change.status === '??' ? 'U' : change.status
   return h(
     'div',
     {
@@ -9695,7 +9697,7 @@ G.GitChangeRow = function GitChangeRow(props) {
       },
       style: { cursor: 'pointer' },
     },
-    h('span', { className: 'gufa-git-status', 'data-kind': change.status }, change.status),
+    h('span', { className: 'gufa-git-status', 'data-kind': displayStatus }, displayStatus),
     h('span', { className: 'gufa-git-path', style: { flex: '1 1 auto' } }, change.path),
     props.staged !== true && typeof props.onRevert === 'function'
       ? h(
