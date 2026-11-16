@@ -1089,7 +1089,6 @@ G.GitRepoDetail = function GitRepoDetail(props) {
   const root = props.root
   const repo = props.repo !== null && props.repo !== undefined ? props.repo : null
   const repoParam = repo !== null && typeof repo.path === 'string' && repo.path !== '' ? repo.path : undefined
-  const withRepo = (body) => (repoParam !== undefined ? { ...body, repo: repoParam } : body)
   const changeWithRepo = (change) => (repoParam !== undefined && change !== null && typeof change === 'object' ? { ...change, repo: repoParam, repoRel: repo.rel ?? '' } : change)
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
@@ -1528,6 +1527,7 @@ G.GitPanel = function GitPanel(props) {
   const [activePath, setActivePath] = useState(null)
   const [summaries, setSummaries] = useState({})
   const [reloadToken, setReloadToken] = useState(0)
+  const [summaryTick, setSummaryTick] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -1568,7 +1568,14 @@ G.GitPanel = function GitPanel(props) {
       setSummaries(Object.fromEntries(entries))
     })
     return () => { cancelled = true }
-  }, [workspaceRoot, repos, props.refreshToken])
+  }, [workspaceRoot, repos, props.refreshToken, summaryTick])
+
+  /* 子目录仓库的变化不会被工作区根目录的轮询发现，面板打开时每 5s 刷新一次各仓库摘要 */
+  useEffect(() => {
+    if (!workspaceRoot) return undefined
+    const timer = window.setInterval(() => setSummaryTick((tick) => tick + 1), 5000)
+    return () => window.clearInterval(timer)
+  }, [workspaceRoot])
 
   const handleStatus = (value) => {
     const repoPath = typeof value?.repo === 'string' ? value.repo : null

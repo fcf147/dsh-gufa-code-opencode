@@ -5,7 +5,7 @@
  * 用法：node scripts/selftest-host.mjs
  */
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -269,6 +269,38 @@ try {
   check('staged file in commit', stagedOnlyHead.text === 'export const stagedOnly = 1\n', JSON.stringify(stagedOnlyHead.text))
   const unstagedHead = await call(router, 'git.show', { root, path: 'src/unstaged.ts', rev: 'head' })
   check('unstaged file not in commit', unstagedHead.missing === true)
+
+  /* 多仓库：工作区根目录仓库 + 子目录仓库分别检测、分别提交 */
+  const nestedRepo = join(projectDir, 'packages', 'lib')
+  mkdirSync(nestedRepo, { recursive: true })
+  execFileSync('git', ['init', '-q'], { cwd: nestedRepo })
+  execFileSync('git', ['config', 'user.email', 'selftest@example.com'], { cwd: nestedRepo })
+  execFileSync('git', ['config', 'user.name', 'gufa selftest'], { cwd: nestedRepo })
+  writeFileSync(join(nestedRepo, 'index.ts'), 'export const nested = 1\n')
+  execFileSync('git', ['add', '.'], { cwd: nestedRepo })
+  execFileSync('git', ['commit', '-qm', 'init nested'], { cwd: nestedRepo })
+  const repoList = await call(router, 'git.repos', { root })
+  check('git.repos lists root repo', repoList.repos.some((repo) => repo.rel === '' && repo.isRoot === true), JSON.stringify(repoList.repos.map((repo) => repo.rel)))
+  check('git.repos lists nested repo', repoList.repos.some((repo) => repo.rel === 'packages/lib'), JSON.stringify(repoList.repos.map((repo) => repo.rel)))
+  const nested = repoList.repos.find((repo) => repo.rel === 'packages/lib')
+  const nestedStatus = await call(router, 'git.status', { root, repo: nested.path })
+  check('nested repo status isolated', nestedStatus.isGit === true && nestedStatus.changes.length === 0, JSON.stringify(nestedStatus.changes))
+  writeFileSync(join(nestedRepo, 'index.ts'), 'export const nested = 2\n')
+  const nestedDirty = await call(router, 'git.status', { root, repo: nested.path })
+  check('nested repo shows own change', nestedDirty.changes.some((change) => change.path === 'index.ts'), JSON.stringify(nestedDirty.changes))
+  await call(router, 'git.stage', { root, repo: nested.path, paths: ['index.ts'] })
+  await call(router, 'git.commit', { root, repo: nested.path, message: 'nested change' })
+  const nestedClean = await call(router, 'git.status', { root, repo: nested.path })
+  check('nested repo commits independently', nestedClean.changes.length === 0, JSON.stringify(nestedClean.changes))
+  const rootStillDirty = await call(router, 'git.status', { root })
+  check('root repo unaffected by nested commit', rootStillDirty.isGit === true && !rootStillDirty.changes.some((change) => change.path === 'packages/lib/index.ts'), JSON.stringify(rootStillDirty.changes))
+  let outsideRepoRejected = false
+  try {
+    await call(router, 'git.status', { root, repo: join(sandbox, 'outside-repo') })
+  } catch (error) {
+    outsideRepoRejected = error.code === 'bad-request'
+  }
+  check('git rejects repo outside workspace', outsideRepoRejected)
 
   const gitSearch = await call(router, 'fs.search', { root, query: 'answer' })
   check('search uses git file list', gitSearch.viaGit === true, String(gitSearch.viaGit))
