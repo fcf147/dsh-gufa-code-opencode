@@ -4,6 +4,8 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { readdir } from 'node:fs/promises'
+import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import { ApiError, badRequest } from './context.js'
 
 const run = promisify(execFile)
@@ -29,16 +31,6 @@ async function git(root, args, timeout = 30_000) {
 
 async function projectOf(env, body) {
   return env.projects.ensure(body.root)
-}
-
-/** 打开项目后才 git init 的目录：动态探测并回填 isGit。 */
-async function ensureRepo(env, body) {
-  const project = await projectOf(env, body)
-  if (project.isGit !== true) {
-    const inside = await git(project.root, ['rev-parse', '--is-inside-work-tree']).catch(() => '')
-    if (inside.trim() === 'true') project.isGit = true
-  }
-  return project
 }
 
 /** 解析 porcelain=v1 -z 输出（NUL 分隔、路径不转义，正确处理空格/中文/重命名）。 */
@@ -138,26 +130,95 @@ function parseStatus(text) {
   return { branch, upstream, hasUpstream: upstream !== '', ahead, behind, changes }
 }
 
+/** 查找工作区内所有 Git 仓库（不只看根目录）。跳过依赖/构建目录，限制深度与数量。 */
+const REPO_SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'out', 'target', '.next', '.turbo', '.cache', 'coverage',
+  '.venv', 'venv', '__pycache__', 'Pods', 'DerivedData', '.gradle', '.mvn', 'vendor',
+  '.idea', '.vscode', '.git',
+])
+
+async function findGitRepos(root) {
+  const repos = []
+  const queue = [{ dir: root, rel: '', depth: 0 }]
+  let visited = 0
+  while (queue.length > 0 && visited < 4000 && repos.length < 100) {
+    const current = queue.shift()
+    visited += 1
+    let entries = []
+    try {
+      entries = await readdir(current.dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    const hasGit = entries.some((entry) => entry.name === '.git')
+    if (hasGit) {
+      repos.push({
+        path: current.dir,
+        rel: current.rel,
+        name: current.rel === '' ? basename(root) : basename(current.dir),
+        isRoot: current.rel === '',
+      })
+    }
+    if (current.depth >= 5) continue
+    for (const entry of entries) {
+      if (entry.isDirectory() !== true) continue
+      if (entry.name.startsWith('.') || REPO_SKIP_DIRS.has(entry.name)) continue
+      queue.push({
+        dir: join(current.dir, entry.name),
+        rel: current.rel === '' ? entry.name : `${current.rel}/${entry.name}`,
+        depth: current.depth + 1,
+      })
+    }
+  }
+  repos.sort((a, b) => (a.isRoot === b.isRoot ? a.rel.localeCompare(b.rel) : a.isRoot ? -1 : 1))
+  return repos
+}
+
+/** 解析请求要操作的仓库：默认工作区根目录；body.repo 指向工作区内某个仓库（嵌套仓库）。 */
+async function repoContext(env, body) {
+  const project = await projectOf(env, body)
+  const base = project.root
+  let root = base
+  const requested = typeof body?.repo === 'string' ? body.repo.trim() : ''
+  if (requested !== '') {
+    const candidate = resolve(isAbsolute(requested) ? requested : join(base, requested))
+    if (candidate !== base && !candidate.startsWith(base + sep)) throw badRequest('repo 不在当前工作区内')
+    const toplevel = (await git(candidate, ['rev-parse', '--show-toplevel']).catch(() => '')).trim()
+    root = toplevel !== '' ? resolve(toplevel) : candidate
+    if (root !== base && !root.startsWith(base + sep)) throw badRequest('repo 不在当前工作区内')
+  }
+  const inside = (await git(root, ['rev-parse', '--is-inside-work-tree']).catch(() => '')).trim() === 'true'
+  if (inside && root === base) project.isGit = true
+  return { project, root, isGit: inside }
+}
+
 export function register(router, env) {
+  /* 列出工作区内所有 Git 仓库（含子目录里的仓库），供左侧面板逐个操作。 */
+  router.method('git.repos', async (body) => {
+    const { root } = await repoContext(env, body)
+    const repos = await findGitRepos(root)
+    return { root: root, repos }
+  })
+
   router.method('git.status', async (body) => {
-    const project = await ensureRepo(env, body)
-    if (!project.isGit) return { isGit: false, branch: '', changes: [], ahead: 0, behind: 0 }
-    const raw = await git(project.root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'])
+    const ctx = await repoContext(env, body)
+    if (!ctx.isGit) return { isGit: false, branch: '', changes: [], ahead: 0, behind: 0 }
+    const raw = await git(ctx.root, ['status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'])
     const parsed = parseStatusZ(raw)
     if (parsed.changes.length > 0 || parsed.branch !== '') return { isGit: true, ...parsed }
-    return { isGit: true, ...parseStatus(await git(project.root, ['status', '--porcelain=v1', '--branch', '--untracked-files=all'])) }
+    return { isGit: true, ...parseStatus(await git(ctx.root, ['status', '--porcelain=v1', '--branch', '--untracked-files=all'])) }
   })
 
   /* 主动 fetch：git.status 的 behind 只反映本地已知的 remote-tracking ref，
      远端有新提交但没 fetch 时箭头永远是 0。进 Git 面板/点刷新时先 fetch。 */
   router.method('git.fetch', async (body) => {
-    const project = await ensureRepo(env, body)
-    if (project.isGit !== true) return { ok: false, reason: 'not-git' }
+    const ctx = await repoContext(env, body)
+    if (!ctx.isGit) return { ok: false, reason: 'not-git' }
     try {
-      const remotes = (await git(project.root, ['remote']).catch(() => '')).trim()
+      const remotes = (await git(ctx.root, ['remote']).catch(() => '')).trim()
         .split('\n').map((line) => line.trim()).filter(Boolean)
       const args = remotes.length > 0 ? ['fetch', '--prune', '--quiet', remotes[0]] : ['fetch', '--prune', '--quiet']
-      await git(project.root, args, 60_000)
+      await git(ctx.root, args, 60_000)
       return { ok: true, remote: remotes[0] ?? '' }
     } catch (error) {
       return { ok: false, reason: String(error?.message ?? error).slice(0, 800) }
@@ -165,34 +226,34 @@ export function register(router, env) {
   })
 
   router.method('git.stage', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const paths = Array.isArray(body.paths) ? body.paths.filter((item) => typeof item === 'string' && item !== '') : []
     if (paths.length === 0) throw badRequest('paths is required')
-    await git(project.root, ['add', '--', ...paths])
+    await git(root, ['add', '--', ...paths])
     return { ok: true }
   })
 
   router.method('git.unstage', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const paths = Array.isArray(body.paths) ? body.paths.filter((item) => typeof item === 'string' && item !== '') : []
     if (paths.length === 0) throw badRequest('paths is required')
     try {
-      await git(project.root, ['restore', '--staged', '--', ...paths])
+      await git(root, ['restore', '--staged', '--', ...paths])
     } catch {
-      await git(project.root, ['reset', '-q', 'HEAD', '--', ...paths])
+      await git(root, ['reset', '-q', 'HEAD', '--', ...paths])
     }
     return { ok: true }
   })
 
   router.method('git.commit', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     if (typeof body.message !== 'string' || body.message.trim() === '') throw badRequest('提交信息不能为空')
     // 先检查暂存区：git commit 在没有暂存内容时只会把提示写到 stdout，直接透传会变成无意义的 "Command failed"
-    const staged = await git(project.root, ['diff', '--cached', '--name-only'])
+    const staged = await git(root, ['diff', '--cached', '--name-only'])
     if (staged.trim() === '') {
       throw new ApiError('nothing-staged', '没有已暂存的改动：请先在「未暂存」里点 + 暂存，或点击「全部暂存」后再提交', 400)
     }
-    const stdout = await git(project.root, ['commit', '-m', body.message])
+    const stdout = await git(root, ['commit', '-m', body.message])
     return { ok: true, output: stdout.trim().slice(0, 4000) }
   })
 
@@ -213,31 +274,31 @@ export function register(router, env) {
   }
 
   router.method('git.push', async (body) => {
-    const project = await projectOf(env, body)
-    const { upstream, remote } = await upstreamOf(project.root)
-    const args = upstream !== '' ? ['push'] : ['push', '-u', remote, await currentBranch(project.root)]
-    const stdout = await git(project.root, args, 120_000)
+    const { root } = await repoContext(env, body)
+    const { upstream, remote } = await upstreamOf(root)
+    const args = upstream !== '' ? ['push'] : ['push', '-u', remote, await currentBranch(root)]
+    const stdout = await git(root, args, 120_000)
     return { ok: true, output: stdout.trim().slice(0, 4000) }
   })
 
   router.method('git.pull', async (body) => {
-    const project = await projectOf(env, body)
-    const { upstream } = await upstreamOf(project.root)
+    const { root } = await repoContext(env, body)
+    const { upstream } = await upstreamOf(root)
     if (upstream === '') throw new ApiError('no-upstream', '当前分支没有上游分支，请先推送一次建立上游', 400)
-    const stdout = await git(project.root, ['pull', '--ff-only'], 120_000)
+    const stdout = await git(root, ['pull', '--ff-only'], 120_000)
     return { ok: true, output: stdout.trim().slice(0, 4000) }
   })
 
   /** 读取某文件在指定版本下的文本内容（供编辑器 diff 使用）。 */
   router.method('git.show', async (body, context = {}) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const path = typeof body.path === 'string' ? body.path : ''
     if (path === '' || path.startsWith('/') || path.includes('..')) throw badRequest('path is invalid')
     const rev = body.rev === 'head' ? 'HEAD:' : ':'
     let text = ''
     let missing = false
     try {
-      text = await git(project.root, ['show', `${rev}${path}`], 30_000)
+      text = await git(root, ['show', `${rev}${path}`], 30_000)
     } catch {
       missing = true
       text = ''
@@ -251,25 +312,25 @@ export function register(router, env) {
 
   /** 撤销指定文件的未暂存改动（git restore --worktree，等价 VS Code 行内还原）。 */
   router.method('git.discard', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const paths = Array.isArray(body.paths) ? body.paths.filter((item) => typeof item === 'string' && item !== '' && !item.includes('..') && !item.startsWith('/')) : []
     if (paths.length === 0) throw badRequest('paths is required')
     try {
-      await git(project.root, ['restore', '--worktree', '--', ...paths], 60_000)
+      await git(root, ['restore', '--worktree', '--', ...paths], 60_000)
     } catch {
-      await git(project.root, ['checkout', '--', ...paths], 60_000)
+      await git(root, ['checkout', '--', ...paths], 60_000)
     }
     return { ok: true }
   })
 
   /** 撤回上一次提交，改动保留在暂存区（等价 git reset --soft HEAD~1；首个提交用 update-ref）。 */
   router.method('git.undoLastCommit', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     try {
-      await git(project.root, ['reset', '--soft', 'HEAD~1'], 60_000)
+      await git(root, ['reset', '--soft', 'HEAD~1'], 60_000)
     } catch (error) {
       try {
-        await git(project.root, ['update-ref', '-d', 'HEAD'], 60_000)
+        await git(root, ['update-ref', '-d', 'HEAD'], 60_000)
       } catch {
         throw error
       }
@@ -279,32 +340,32 @@ export function register(router, env) {
 
   /** 撤销所有（未暂存 + 已暂存）的已跟踪文件改动；不删除未跟踪文件。 */
   router.method('git.discardAll', async (body) => {
-    const project = await projectOf(env, body)
-    const staged = await git(project.root, ['diff', '--cached', '--name-only']).catch(() => '')
-    if (staged.trim() !== '') await git(project.root, ['restore', '--staged', '--', '.'], 60_000)
-    await git(project.root, ['restore', '--worktree', '--', '.'], 60_000).catch(async () => {
-      await git(project.root, ['checkout', '--', '.'], 60_000)
+    const { root } = await repoContext(env, body)
+    const staged = await git(root, ['diff', '--cached', '--name-only']).catch(() => '')
+    if (staged.trim() !== '') await git(root, ['restore', '--staged', '--', '.'], 60_000)
+    await git(root, ['restore', '--worktree', '--', '.'], 60_000).catch(async () => {
+      await git(root, ['checkout', '--', '.'], 60_000)
     })
     return { ok: true }
   })
 
   router.method('git.diff', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const args = ['diff', '--no-color', '--unified=3']
     if (body.staged === true) args.push('--cached')
     if (typeof body.path === 'string' && body.path !== '') args.push('--', body.path)
-    const patch = await git(project.root, args)
+    const patch = await git(root, args)
     return { patch }
   })
 
   /** 某次提交的详情：提交信息 + 改动文件列表（name-status）。 */
   router.method('git.commitFiles', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const hash = typeof body.hash === 'string' ? body.hash.trim() : ''
     if (!/^[0-9a-f]{4,64}$/i.test(hash)) throw badRequest('hash is invalid')
-    const metaText = await git(project.root, ['show', '-s', '--format=%H%x1f%h%x1f%an%x1f%ar%x1f%P%x1f%s', hash], 60_000)
+    const metaText = await git(root, ['show', '-s', '--format=%H%x1f%h%x1f%an%x1f%ar%x1f%P%x1f%s', hash], 60_000)
     const meta = metaText.trim().split('\u001f')
-    const filesText = await git(project.root, ['show', '--name-status', '--format=', '--no-renames', hash], 60_000)
+    const filesText = await git(root, ['show', '--name-status', '--format=', '--no-renames', hash], 60_000)
     const files = filesText
       .split('\n')
       .filter((line) => line.trim() !== '')
@@ -328,7 +389,7 @@ export function register(router, env) {
 
   /** 读取某文件在指定提交（或其父提交）中的文本内容，供提交 diff 使用。 */
   router.method('git.fileVersion', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const path = typeof body.path === 'string' ? body.path : ''
     const hash = typeof body.hash === 'string' ? body.hash.trim() : ''
     if (path === '' || path.startsWith('/') || path.includes('..')) throw badRequest('path is invalid')
@@ -337,7 +398,7 @@ export function register(router, env) {
     let text = ''
     let missing = false
     try {
-      text = await git(project.root, ['show', ref], 60_000)
+      text = await git(root, ['show', ref], 60_000)
     } catch {
       missing = true
       text = ''
@@ -351,13 +412,13 @@ export function register(router, env) {
 
   /** 提交图数据：hash / 父提交 / 作者 / 相对时间 / 引用装饰 / 标题。 */
   router.method('git.graph', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const limit = Number.isInteger(body.limit) && body.limit > 0 ? Math.min(body.limit, 300) : 120
     const args = ['log', `-n${limit}`, '--date=relative', '--format=%H%x1f%h%x1f%P%x1f%an%x1f%ar%x1f%D%x1f%s', '--decorate=short']
     if (body.all !== false) args.push('--all')
     let text = ''
     try {
-      text = await git(project.root, args, 60_000)
+      text = await git(root, args, 60_000)
     } catch (error) {
       return { commits: [], branch: '', error: error instanceof Error ? error.message : String(error) }
     }
@@ -373,15 +434,15 @@ export function register(router, env) {
         subject: rest.join('\u001f'),
       }
     })
-    const branch = (await git(project.root, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim()
+    const branch = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim()
     return { commits, branch, error: '' }
   })
 
   router.method('git.log', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const limit = Number.isInteger(body.limit) && body.limit > 0 ? Math.min(body.limit, 100) : 30
     const format = '%H%x1f%h%x1f%an%x1f%ar%x1f%s'
-    const stdout = await git(project.root, ['log', `-n${limit}`, `--format=${format}`])
+    const stdout = await git(root, ['log', `-n${limit}`, `--format=${format}`])
     const commits = stdout.split('\n').filter(Boolean).map((line) => {
       const [hash, short, author, when, ...rest] = line.split('\x1f')
       return { hash, short, author, when, subject: rest.join('\x1f') }
@@ -390,11 +451,11 @@ export function register(router, env) {
   })
 
   router.method('git.branches', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     // 注意：%x1f 是 git log 的转义，ref-filter（branch/for-each-ref 的 --format）不支持，
     // 因此这里用 for-each-ref 拿名字 + rev-parse 判断当前分支，不要拼接格式转义。
-    const stdout = await git(project.root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
-    const current = (await git(project.root, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim()
+    const stdout = await git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
+    const current = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => '')).trim()
     const branches = stdout
       .split('\n')
       .map((line) => line.trim())
@@ -405,26 +466,26 @@ export function register(router, env) {
 
   /** 新建并切换到新分支。 */
   router.method('git.createBranch', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     if (name === '') throw badRequest('分支名不能为空')
-    await git(project.root, ['check-ref-format', '--branch', name]).catch(() => {
+    await git(root, ['check-ref-format', '--branch', name]).catch(() => {
       throw new ApiError('branch-invalid', `分支名不合法：${name}`, 400)
     })
-    const exists = (await git(project.root, ['branch', '--list', '--format=%(refname:short)', name]).catch(() => '')).trim()
+    const exists = (await git(root, ['branch', '--list', '--format=%(refname:short)', name]).catch(() => '')).trim()
     if (exists !== '') throw new ApiError('branch-exists', `分支已存在：${name}`, 409)
     try {
-      await git(project.root, ['switch', '-c', name], 60_000)
+      await git(root, ['switch', '-c', name], 60_000)
     } catch {
-      await git(project.root, ['checkout', '-b', name], 60_000)
+      await git(root, ['checkout', '-b', name], 60_000)
     }
     return { ok: true, branch: name }
   })
 
   router.method('git.checkout', async (body) => {
-    const project = await projectOf(env, body)
+    const { root } = await repoContext(env, body)
     if (typeof body.branch !== 'string' || body.branch === '') throw badRequest('branch is required')
-    await git(project.root, ['checkout', body.branch])
+    await git(root, ['checkout', body.branch])
     return { ok: true }
   })
 

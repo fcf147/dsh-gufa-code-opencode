@@ -243,6 +243,8 @@ const DICT_ZH = {
   'git.branch': '分支',
   'git.changes': '更改',
   'git.noRepo': '当前工作区不是 Git 仓库',
+  'git.repos': 'Git 仓库',
+  'git.workspaceRoot': '工作区根目录',
   'git.noChanges': '工作区干净',
   'git.stage': '暂存',
   'git.unstage': '取消暂存',
@@ -494,6 +496,8 @@ const DICT_EN = {
   'git.branch': 'Branch',
   'git.changes': 'Changes',
   'git.noRepo': 'This workspace is not a Git repository',
+  'git.repos': 'Git repositories',
+  'git.workspaceRoot': 'Workspace root',
   'git.noChanges': 'Working tree clean',
   'git.stage': 'Stage',
   'git.unstage': 'Unstage',
@@ -1829,6 +1833,16 @@ html[data-platform=darwin][data-fullscreen] .gufa-titlebar{height:44px;padding-l
 .gufa-git-status[data-kind="D"]{color:var(--dsw-alias-state-error-primary)}
 .gufa-git-status[data-kind="??"]{color:var(--dsw-alias-state-success-primary)}
 .gufa-git-path{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;direction:rtl;text-align:left}
+.gufa-git-repos{border-bottom:1px solid var(--gufa-border);padding:4px 6px 6px;flex:0 0 auto}
+.gufa-git-repos-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;font-size:11px;font-weight:600;color:var(--gufa-text-dim)}
+.gufa-git-repos-list{display:flex;flex-direction:column;gap:1px;max-height:min(30vh,220px);overflow:auto}
+.gufa-git-repo-row{display:flex;align-items:center;gap:7px;width:100%;height:30px;padding:0 7px;border:0;border-radius:6px;background:transparent;color:var(--gufa-text);font:inherit;font-size:12px;cursor:pointer;text-align:left;min-width:0}
+.gufa-git-repo-row:hover{background:var(--gufa-hover)}
+.gufa-git-repo-row[data-active]{background:var(--gufa-active)}
+.gufa-git-repo-meta{display:flex;flex-direction:column;min-width:0;flex:1 1 auto;line-height:1.25}
+.gufa-git-repo-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
+.gufa-git-repo-branch{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--gufa-text-dim)}
+.gufa-git-repo-sync{flex:0 0 auto;font-size:10.5px;color:var(--gufa-text-dim);font-variant-numeric:tabular-nums}
 .gufa-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;border-radius:9px;
   background:var(--gufa-accent);color:#fff;font-size:10px;font-weight:700}
 .gufa-ssh-host{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;cursor:pointer;border-radius:6px;min-width:0}
@@ -7815,6 +7829,7 @@ function gufaGraphRow(props) {
 G.GitGraphView = function GitGraphView(props) {
   const t = G.useT()
   const root = typeof props.root === 'string' && props.root !== '' ? props.root : null
+  const repo = typeof props.repo === 'string' && props.repo !== '' ? props.repo : undefined
   const [state, setState] = useState({ status: 'loading', commits: [], branch: '', error: '' })
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState({ status: 'idle', files: [], error: '' })
@@ -7828,7 +7843,7 @@ G.GitGraphView = function GitGraphView(props) {
     }
     let cancelled = false
     setState((current) => ({ ...current, status: current.commits.length === 0 ? 'loading' : 'refreshing', error: '' }))
-    void G.api('git.graph', { root, all: showAll })
+    void G.api('git.graph', { root, repo, all: showAll })
       .then((value) => {
         if (cancelled) return
         setState({
@@ -7845,7 +7860,7 @@ G.GitGraphView = function GitGraphView(props) {
     return () => {
       cancelled = true
     }
-  }, [root, props.refreshToken, showAll])
+  }, [root, repo, props.refreshToken, showAll])
 
   /* 选中提交后拉取改动文件列表 */
   useEffect(() => {
@@ -7855,7 +7870,7 @@ G.GitGraphView = function GitGraphView(props) {
     }
     let cancelled = false
     setDetail({ status: 'loading', files: [], error: '' })
-    void G.api('git.commitFiles', { root, hash: selected.hash })
+    void G.api('git.commitFiles', { root, repo, hash: selected.hash })
       .then((value) => {
         if (cancelled) return
         setDetail({ status: 'ready', files: Array.isArray(value?.files) ? value.files : [], error: '' })
@@ -9068,9 +9083,13 @@ G.SearchPanel = function SearchPanel(props) {
 }
 
 /* ── 源代码管理（Git） ─────────────────────────────────────────────────── */
-G.GitPanel = function GitPanel(props) {
+G.GitRepoDetail = function GitRepoDetail(props) {
   const t = G.useT()
   const root = props.root
+  const repo = props.repo !== null && props.repo !== undefined ? props.repo : null
+  const repoParam = repo !== null && typeof repo.path === 'string' && repo.path !== '' ? repo.path : undefined
+  const withRepo = (body) => (repoParam !== undefined ? { ...body, repo: repoParam } : body)
+  const changeWithRepo = (change) => (repoParam !== undefined && change !== null && typeof change === 'object' ? { ...change, repo: repoParam, repoRel: repo.rel ?? '' } : change)
   const [status, setStatus] = useState(null)
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
@@ -9093,10 +9112,10 @@ G.GitPanel = function GitPanel(props) {
     }
     setError('')
     try {
-      const value = await G.api('git.status', { root: target })
+      const value = await G.api('git.status', { root: target, repo: repoParam })
       setStatus(value)
       try {
-        onStatusRef.current?.(value)
+        onStatusRef.current?.(repoParam !== undefined ? { ...value, repo: repoParam } : value)
       } catch {
         /* 通知失败不影响面板 */
       }
@@ -9105,13 +9124,13 @@ G.GitPanel = function GitPanel(props) {
       // 失败也不要停在「加载中」：给一个空状态让错误可见
       setStatus((current) => current ?? { isGit: true, branch: '', ahead: 0, behind: 0, changes: [] })
     }
-  }, [])
+  }, [repoParam])
 
   /* 手动刷新：先 fetch 远端，再读 status（否则 behind 可能是 0） */
   const refreshRemote = useCallback(async () => {
     const target = rootRef.current
     if (target) {
-      try { await G.api('git.fetch', { root: target }) } catch { /* 离线等失败不打扰 */ }
+      try { await G.api('git.fetch', { root: target, repo: repoParam }) } catch { /* 离线等失败不打扰 */ }
     }
     await refresh()
   }, [refresh])
@@ -9121,7 +9140,7 @@ G.GitPanel = function GitPanel(props) {
     setStatus(null)
     setMessage('')
     void refresh()
-  }, [root, refresh])
+  }, [root, repoParam, refresh])
 
   /* 外部刷新令牌：保留当前内容，仅后台刷新 */
   useEffect(() => {
@@ -9145,18 +9164,18 @@ G.GitPanel = function GitPanel(props) {
 
   /* 推送 / 拉取：点 ↑/↓ 直接执行 */
   const push = () => void act(async () => {
-    await G.api('git.push', { root })
+    await G.api('git.push', { root, repo: repoParam })
   })
   const pull = () => void act(async () => {
-    await G.api('git.pull', { root })
+    await G.api('git.pull', { root, repo: repoParam })
   })
 
   /* 推送 / 拉取（新建分支还没有上游时也能直接发布：Host 会自动 -u <remote> <branch>） */
   const pushBranch = () => void act(async () => {
-    await G.api('git.push', { root })
+    await G.api('git.push', { root, repo: repoParam })
   })
   const pullBranch = () => void act(async () => {
-    await G.api('git.pull', { root })
+    await G.api('git.pull', { root, repo: repoParam })
   })
 
   /* 一键撤销所有未暂存改动：第一次点击进入「再点确认」，3 秒后自动取消 */
@@ -9168,7 +9187,7 @@ G.GitPanel = function GitPanel(props) {
     }
     setDiscardArmed(false)
     void act(async () => {
-      await G.api('git.discardAll', { root })
+      await G.api('git.discardAll', { root, repo: repoParam })
     })
   }
 
@@ -9194,9 +9213,9 @@ G.GitPanel = function GitPanel(props) {
       /* 有已暂存改动时只提交暂存内容；一个都没暂存时才自动全部暂存再提交（快捷模式） */
       if (staged.length === 0) {
         const toStage = changes.filter((item) => item.staged !== true).map((item) => item.path)
-        if (toStage.length > 0) await G.api('git.stage', { root, paths: toStage })
+        if (toStage.length > 0) await G.api('git.stage', { root, repo: repoParam, paths: toStage })
       }
-      await G.api('git.commit', { root, message: text })
+      await G.api('git.commit', { root, repo: repoParam, message: text })
       setMessage('')
     })
   }
@@ -9250,20 +9269,20 @@ G.GitPanel = function GitPanel(props) {
     h(
       'div',
       { className: 'gufa-panel-head' },
-      h('span', { className: 'gufa-panel-head-title' }, t('activity.git')),
+      h('span', { className: 'gufa-panel-head-title' }, repo !== null && repo.rel ? repo.rel : t('activity.git')),
       changes.length > 0 ? h('span', { className: 'gufa-badge' }, String(changes.length)) : null,
       unstaged.length > 0
         ? h(G.IconButton, {
             title: t('git.stageAll'),
             disabled: pending,
-            onClick: () => void act(async () => { await G.api('git.stage', { root, paths: unstaged.map((item) => item.path) }) }),
+            onClick: () => void act(async () => { await G.api('git.stage', { root, repo: repoParam, paths: unstaged.map((item) => item.path) }) }),
           }, h(G.Icon, { name: 'plus', size: 13 }))
         : null,
       staged.length > 0
         ? h(G.IconButton, {
             title: t('git.unstageAll'),
             disabled: pending,
-            onClick: () => void act(async () => { await G.api('git.unstage', { root, paths: staged.map((item) => item.path) }) }),
+            onClick: () => void act(async () => { await G.api('git.unstage', { root, repo: repoParam, paths: staged.map((item) => item.path) }) }),
           }, h(G.Icon, { name: 'minus', size: 13 }))
         : null,
       unstaged.length > 0
@@ -9304,7 +9323,7 @@ G.GitPanel = function GitPanel(props) {
             h('span', { className: 'gufa-git-sync-count' }, String(status?.behind ?? 0)),
           )
         : null,
-      h(G.IconButton, { title: t('graph.open'), onClick: () => props.onOpenGraph?.() }, h(G.Icon, { name: 'graph', size: 13 })),
+      h(G.IconButton, { title: t('graph.open'), onClick: () => props.onOpenGraph?.(repo) }, h(G.Icon, { name: 'graph', size: 13 })),
       h(G.IconButton, { title: t('git.refresh'), disabled: pending, onClick: () => void refreshRemote() }, h(G.Icon, { name: 'refresh', size: 13 })),
       h(G.IconButton, {
         title: t('git.more'),
@@ -9334,7 +9353,7 @@ G.GitPanel = function GitPanel(props) {
                     className: 'gufa-row',
                     style: { color: 'var(--gufa-text-dim)', fontSize: 11.5, cursor: 'pointer' },
                     title: t('git.branchSwitchHint'),
-                    onClick: (event) => props.onOpenBranches?.(event),
+                    onClick: (event) => props.onOpenBranches?.(event, repo),
                   },
                   h(G.Icon, { name: 'branch', size: 13 }),
                   h('span', { style: { color: 'var(--gufa-text)', fontWeight: 600 } }, status.branch || '—'),
@@ -9400,9 +9419,9 @@ G.GitPanel = function GitPanel(props) {
                     change,
                     pending,
                     staged: true,
-                    onOpen: () => props.onOpenDiff?.(change),
+                    onOpen: () => props.onOpenDiff?.(changeWithRepo(change)),
                     onContextMenu: (event, rowChange) => setRowMenu({ ...clampMenuPosition(event.clientX, event.clientY, 200, 200), change: rowChange }),
-                    onAction: () => void act(async () => G.api('git.unstage', { root, paths: [change.path] })),
+                    onAction: () => void act(async () => G.api('git.unstage', { root, repo: repoParam, paths: [change.path] })),
                     actionLabel: t('git.unstage'),
                     actionIcon: 'minus',
                   }),
@@ -9413,11 +9432,11 @@ G.GitPanel = function GitPanel(props) {
                     key: `u:${change.path}`,
                     change,
                     pending,
-                    onOpen: () => props.onOpenDiff?.(change),
+                    onOpen: () => props.onOpenDiff?.(changeWithRepo(change)),
                     onContextMenu: (event, rowChange) => setRowMenu({ ...clampMenuPosition(event.clientX, event.clientY, 200, 200), change: rowChange }),
-                    onRevert: () => void act(async () => G.api('git.discard', { root, paths: [change.path] })),
+                    onRevert: () => void act(async () => G.api('git.discard', { root, repo: repoParam, paths: [change.path] })),
                     revertLabel: t('git.discardFile'),
-                    onAction: () => void act(async () => G.api('git.stage', { root, paths: [change.path] })),
+                    onAction: () => void act(async () => G.api('git.stage', { root, repo: repoParam, paths: [change.path] })),
                     actionLabel: t('git.stage'),
                     actionIcon: 'plus',
                   }),
@@ -9437,14 +9456,14 @@ G.GitPanel = function GitPanel(props) {
             ? h(G.MenuItem, {
                 icon: 'plus',
                 label: t('git.stageAll'),
-                onClick: menuAction(() => void act(async () => { await G.api('git.stage', { root, paths: unstaged.map((item) => item.path) }) })),
+                onClick: menuAction(() => void act(async () => { await G.api('git.stage', { root, repo: repoParam, paths: unstaged.map((item) => item.path) }) })),
               })
             : null,
           staged.length > 0
             ? h(G.MenuItem, {
                 icon: 'minus',
                 label: t('git.unstageAll'),
-                onClick: menuAction(() => void act(async () => { await G.api('git.unstage', { root, paths: staged.map((item) => item.path) }) })),
+                onClick: menuAction(() => void act(async () => { await G.api('git.unstage', { root, repo: repoParam, paths: staged.map((item) => item.path) }) })),
               })
             : null,
           unstaged.length > 0
@@ -9452,18 +9471,18 @@ G.GitPanel = function GitPanel(props) {
                 icon: 'undo',
                 label: t('git.discardAll'),
                 danger: true,
-                onClick: menuAction(() => void act(async () => { await G.api('git.discardAll', { root }) })),
+                onClick: menuAction(() => void act(async () => { await G.api('git.discardAll', { root, repo: repoParam }) })),
               })
             : null,
           h(G.MenuItem, {
             icon: 'arrow-left',
             label: t('git.undoLastCommit'),
-            onClick: menuAction(() => void act(async () => { await G.api('git.undoLastCommit', { root }) })),
+            onClick: menuAction(() => void act(async () => { await G.api('git.undoLastCommit', { root, repo: repoParam }) })),
           }),
           h(G.MenuItem, {
             icon: 'graph',
             label: t('graph.open'),
-            onClick: menuAction(() => props.onOpenGraph?.()),
+            onClick: menuAction(() => props.onOpenGraph?.(repo)),
           }),
         )),
     rowMenu === null
@@ -9475,28 +9494,169 @@ G.GitPanel = function GitPanel(props) {
             style: { left: rowMenu.x, top: rowMenu.y, position: 'fixed', minWidth: 190 },
             onMouseDown: (event) => event.stopPropagation(),
           },
-          h(G.MenuItem, { icon: 'code', label: t('git.viewDiff'), onClick: menuAction(() => props.onOpenDiff?.(rowMenu.change)) }),
+          h(G.MenuItem, { icon: 'code', label: t('git.viewDiff'), onClick: menuAction(() => props.onOpenDiff?.(changeWithRepo(rowMenu.change))) }),
           rowMenu.change.staged === true
             ? h(G.MenuItem, {
                 icon: 'minus',
                 label: t('git.unstage'),
-                onClick: menuAction(() => void act(async () => { await G.api('git.unstage', { root, paths: [rowMenu.change.path] }) })),
+                onClick: menuAction(() => void act(async () => { await G.api('git.unstage', { root, repo: repoParam, paths: [rowMenu.change.path] }) })),
               })
             : h(G.MenuItem, {
                 icon: 'plus',
                 label: t('git.stage'),
-                onClick: menuAction(() => void act(async () => { await G.api('git.stage', { root, paths: [rowMenu.change.path] }) })),
+                onClick: menuAction(() => void act(async () => { await G.api('git.stage', { root, repo: repoParam, paths: [rowMenu.change.path] }) })),
               }),
           rowMenu.change.staged !== true
             ? h(G.MenuItem, {
                 icon: 'undo',
                 label: t('git.discardFile'),
                 danger: true,
-                onClick: menuAction(() => void act(async () => { await G.api('git.discard', { root, paths: [rowMenu.change.path] }) })),
+                onClick: menuAction(() => void act(async () => { await G.api('git.discard', { root, repo: repoParam, paths: [rowMenu.change.path] }) })),
               })
             : null,
           h(G.MenuItem, { icon: 'files', label: t('git.copyPath'), onClick: menuAction(() => copyText(rowMenu.change.path)) }),
         )),
+  )
+}
+
+/* ── 源代码管理：工作区内所有 Git 仓库列表（根仓库 + 子目录仓库），逐仓库操作 ── */
+G.GitPanel = function GitPanel(props) {
+  const t = G.useT()
+  const workspaceRoot = props.root
+  const [repos, setRepos] = useState(null)
+  const [activePath, setActivePath] = useState(null)
+  const [summaries, setSummaries] = useState({})
+  const [reloadToken, setReloadToken] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setRepos(null)
+    if (!workspaceRoot) {
+      setRepos([])
+      return () => { cancelled = true }
+    }
+    void G.api('git.repos', { root: workspaceRoot })
+      .then((value) => {
+        if (cancelled) return
+        const list = Array.isArray(value?.repos) ? value.repos : []
+        setRepos(list)
+        setActivePath((current) => (list.some((item) => item.path === current) ? current : (list[0]?.path ?? null)))
+      })
+      .catch(() => {
+        if (cancelled) return
+        /* 旧 Host 没有 git.repos：退回原来的单仓库模式 */
+        const fallback = [{ path: workspaceRoot, rel: '', name: G.basename(workspaceRoot), isRoot: true }]
+        setRepos(fallback)
+        setActivePath(workspaceRoot)
+      })
+    return () => { cancelled = true }
+  }, [workspaceRoot, props.refreshToken, reloadToken])
+
+  useEffect(() => {
+    if (!workspaceRoot || repos === null || repos.length === 0) return undefined
+    let cancelled = false
+    void Promise.all(repos.map(async (repo) => {
+      try {
+        const status = await G.api('git.status', { root: workspaceRoot, repo: repo.path })
+        return [repo.path, status]
+      } catch {
+        return [repo.path, null]
+      }
+    })).then((entries) => {
+      if (cancelled) return
+      setSummaries(Object.fromEntries(entries))
+    })
+    return () => { cancelled = true }
+  }, [workspaceRoot, repos, props.refreshToken])
+
+  const handleStatus = (value) => {
+    const repoPath = typeof value?.repo === 'string' ? value.repo : null
+    if (repoPath !== null) setSummaries((current) => ({ ...current, [repoPath]: value }))
+    let forwarded = value
+    if (repoPath !== null && Array.isArray(value?.changes)) {
+      const repo = repos?.find((item) => item.path === repoPath)
+      if (repo !== undefined && repo.rel !== '') {
+        forwarded = { ...value, changes: value.changes.map((change) => ({ ...change, path: `${repo.rel}/${change.path}` })) }
+      }
+    }
+    props.onStatus?.(forwarded)
+  }
+
+  const activeRepo = repos !== null && activePath !== null
+    ? repos.find((item) => item.path === activePath) ?? null
+    : null
+  const showList = repos !== null && repos.length > 1
+  const detailProps = {
+    root: workspaceRoot,
+    refreshToken: props.refreshToken,
+    onStatus: handleStatus,
+    onOpenFile: props.onOpenFile,
+    onOpenDiff: props.onOpenDiff,
+    onOpenBranches: props.onOpenBranches,
+    onOpenGraph: props.onOpenGraph,
+    onChanged: props.onChanged,
+  }
+
+  return h(
+    'div',
+    { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 } },
+    showList
+      ? h(
+          'div',
+          { className: 'gufa-git-repos' },
+          h(
+            'div',
+            { className: 'gufa-git-repos-head' },
+            h('span', null, `${t('git.repos')} (${repos.length})`),
+            h(G.IconButton, {
+              title: t('git.refresh'),
+              onClick: () => setReloadToken((token) => token + 1),
+            }, h(G.Icon, { name: 'refresh', size: 12 })),
+          ),
+          h(
+            'div',
+            { className: 'gufa-git-repos-list gufa-scroll' },
+            ...repos.map((repo) => {
+              const summary = summaries[repo.path]
+              const changeCount = Array.isArray(summary?.changes) ? summary.changes.length : 0
+              const ahead = Number(summary?.ahead ?? 0)
+              const behind = Number(summary?.behind ?? 0)
+              return h(
+                'button',
+                {
+                  key: repo.path,
+                  type: 'button',
+                  className: 'gufa-git-repo-row',
+                  'data-active': repo.path === activePath ? '' : undefined,
+                  title: repo.path,
+                  onClick: () => setActivePath(repo.path),
+                },
+                h(G.Icon, { name: 'git', size: 13 }),
+                h(
+                  'span',
+                  { className: 'gufa-git-repo-meta' },
+                  h('span', { className: 'gufa-git-repo-name' }, repo.rel === '' ? t('git.workspaceRoot') : repo.rel),
+                  h('span', { className: 'gufa-git-repo-branch' }, summary?.branch || '—'),
+                ),
+                changeCount > 0 ? h('span', { className: 'gufa-badge' }, String(changeCount)) : null,
+                ahead > 0 ? h('span', { className: 'gufa-git-repo-sync' }, `↑${ahead}`) : null,
+                behind > 0 ? h('span', { className: 'gufa-git-repo-sync' }, `↓${behind}`) : null,
+              )
+            }),
+          ),
+        )
+      : null,
+    h(
+      'div',
+      { style: { flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' } },
+      repos === null
+        ? h('div', { className: 'gufa-panel-body' }, h(G.Empty, { title: t('common.loading') }))
+        : h(G.GitRepoDetail, {
+            key: activeRepo !== null ? activeRepo.path : 'root',
+            ...detailProps,
+            repo: activeRepo,
+          }),
+    ),
   )
 }
 
@@ -13639,24 +13799,29 @@ G.GufaApp = function GufaApp(props) {
   }, [])
 
   /* ── Git Graph（提交图标签页） ─────────────────────────────────────── */
-  const openGitGraph = useCallback(() => {
+  const openGitGraph = useCallback((repo) => {
     if (project === null) return
-    const path = 'gufa-graph'
+    const repoPath = repo !== null && repo !== undefined && typeof repo.path === 'string' ? repo.path : null
+    const repoRel = repo !== null && repo !== undefined && typeof repo.rel === 'string' ? repo.rel : ''
+    const path = repoPath !== null && repoRel !== '' ? `gufa-graph:${repoRel}` : 'gufa-graph'
     setTabs((current) => {
-      if (current.some((tab) => tab !== null && tab.path === path)) return current
-      return [...current, { path, title: 'Git Graph', kind: 'graph' }]
+      const existing = current.find((tab) => tab !== null && tab.path === path)
+      if (existing !== undefined) return current.map((tab) => (tab !== null && tab.path === path ? { ...tab, gitRepo: repoPath, gitRepoRel: repoRel } : tab))
+      return [...current, { path, title: 'Git Graph', kind: 'graph', gitRepo: repoPath, gitRepoRel: repoRel }]
     })
     setActivePath(path)
   }, [project])
 
   /* Git Graph：点开某次提交里的文件 → 提交版本 diff（父提交 vs 该提交） */
-  const openCommitFile = useCallback(async (commit, file) => {
+  const openCommitFile = useCallback(async (commit, file, repoCtx) => {
     if (project === null || commit === null || commit === undefined || file === null || file === undefined) return
     if (typeof file.path !== 'string' || file.path === '' || typeof commit.hash !== 'string') return
+    const repoRoot = repoCtx !== null && repoCtx !== undefined && typeof repoCtx.path === 'string' ? repoCtx.path : undefined
+    const repoRel = repoCtx !== null && repoCtx !== undefined && typeof repoCtx.rel === 'string' ? repoCtx.rel : ''
     try {
       const [leftResult, rightResult] = await Promise.all([
-        G.api('git.fileVersion', { root: project.root, path: file.path, hash: commit.hash, parent: true }).catch(() => ({ text: '' })),
-        G.api('git.fileVersion', { root: project.root, path: file.path, hash: commit.hash }).catch(() => ({ text: '' })),
+        G.api('git.fileVersion', { root: project.root, repo: repoRoot, path: file.path, hash: commit.hash, parent: true }).catch(() => ({ text: '' })),
+        G.api('git.fileVersion', { root: project.root, repo: repoRoot, path: file.path, hash: commit.hash }).catch(() => ({ text: '' })),
       ])
       const path = `gufa-commit:${commit.hash.slice(0, 10)}:${file.path}`
       const leftText = typeof leftResult?.text === 'string' ? leftResult.text : ''
@@ -13686,8 +13851,11 @@ G.GufaApp = function GufaApp(props) {
   }, [project])
 
   /* 分支切换 / 新建 ──────────────────────────────────────────────── */
-  const openBranchMenu = useCallback((event) => {
-    if (project === null || project.isGit !== true) return
+  const openBranchMenu = useCallback((event, repo) => {
+    if (project === null) return
+    const repoPath = repo !== null && repo !== undefined && typeof repo.path === 'string' ? repo.path : undefined
+    /* 工作区根目录不是 Git 仓库时，仍允许对子目录仓库切换分支 */
+    if (repoPath === undefined && project.isGit !== true) return
     let placement = { x: 12, top: 40 }
     try {
       const rect = event !== null && event !== undefined && event.currentTarget !== null
@@ -13703,8 +13871,8 @@ G.GufaApp = function GufaApp(props) {
       /* ignore */
     }
     setBranchInput('')
-    setBranchMenu({ ...placement, loading: true, branches: [], error: '' })
-    void G.api('git.branches', { root: project.root })
+    setBranchMenu({ ...placement, repo: repoPath, loading: true, branches: [], error: '' })
+    void G.api('git.branches', { root: project.root, repo: repoPath })
       .then((value) => {
         setBranchMenu((current) => (current === null ? current : { ...current, loading: false, branches: Array.isArray(value?.branches) ? value.branches : [] }))
       })
@@ -13739,7 +13907,7 @@ G.GufaApp = function GufaApp(props) {
   const checkoutBranch = useCallback(async (name) => {
     if (project === null || typeof name !== 'string' || name === '') return
     try {
-      await G.api('git.checkout', { root: project.root, branch: name })
+      await G.api('git.checkout', { root: project.root, repo: branchMenu?.repo, branch: name })
       closeBranchMenu()
       setGitRefreshToken((token) => token + 1)
       setRefreshToken((token) => token + 1)
@@ -13747,14 +13915,14 @@ G.GufaApp = function GufaApp(props) {
     } catch (error) {
       setBranchMenu((current) => (current === null ? current : { ...current, error: G.errorText(error) }))
     }
-  }, [project, closeBranchMenu, refreshGit])
+  }, [project, branchMenu, closeBranchMenu, refreshGit])
 
   const createBranch = useCallback(async () => {
     if (project === null) return
     const name = branchInput.trim()
     if (name === '') return
     try {
-      await G.api('git.createBranch', { root: project.root, name })
+      await G.api('git.createBranch', { root: project.root, repo: branchMenu?.repo, name })
       closeBranchMenu()
       setGitRefreshToken((token) => token + 1)
       setRefreshToken((token) => token + 1)
@@ -13762,7 +13930,7 @@ G.GufaApp = function GufaApp(props) {
     } catch (error) {
       setBranchMenu((current) => (current === null ? current : { ...current, error: G.errorText(error) }))
     }
-  }, [project, branchInput, closeBranchMenu, refreshGit])
+  }, [project, branchMenu, branchInput, closeBranchMenu, refreshGit])
 
   /* ── 删除（无确认弹窗，软删除到临时目录，⌘Z 可撤销） ──────────────── */
   const deleteEntry = useCallback(async (path) => {
@@ -13833,7 +14001,12 @@ G.GufaApp = function GufaApp(props) {
   /* ── Git diff / 两文件对比（Monaco DiffEditor） ────────────────────── */
   const openDiffForChange = useCallback(async (change) => {
     if (project === null || change === null || typeof change !== 'object' || typeof change.path !== 'string') return
-    const existing = tabs.find((item) => item.path === change.path)
+    /* 嵌套仓库：diff 的路径是仓库内相对路径，编辑器/文件读写的 path 需要补上仓库相对工作区的前缀 */
+    const repoRoot = typeof change.repo === 'string' && change.repo !== '' ? change.repo : null
+    const repoRel = typeof change.repoRel === 'string' ? change.repoRel : ''
+    const wsPath = repoRel !== '' ? `${repoRel}/${change.path}` : change.path
+    const gitBody = repoRoot !== null ? { root: project.root, repo: repoRoot } : { root: project.root }
+    const existing = tabs.find((item) => item.path === wsPath)
     if (existing !== undefined && existing !== null && existing.kind !== 'diff' && existing.dirty === true) {
       setBanner('该文件有未保存修改，请先保存后再查看 diff')
       return
@@ -13842,14 +14015,14 @@ G.GufaApp = function GufaApp(props) {
       /* 文件可能已删除（工作树删掉/暂存区删除）：读不到就按空处理，仍然展示差异 */
       let file = null
       try {
-        file = await G.api('fs.read', { root: project.root, path: change.path })
+        file = await G.api('fs.read', { root: project.root, path: wsPath })
       } catch {
         file = null
       }
       let left = ''
       try {
         const shown = await G.api('git.show', {
-          root: project.root,
+          ...gitBody,
           path: change.path,
           rev: change.staged === true ? 'head' : 'index',
         })
@@ -13861,14 +14034,14 @@ G.GufaApp = function GufaApp(props) {
       if (change.staged === true) {
         /* 暂存区 diff = HEAD ↔ 索引；右侧必须用索引内容，而不是工作树（工作树可能还有未暂存改动） */
         try {
-          const indexDoc = await G.api('git.show', { root: project.root, path: change.path, rev: 'index' })
+          const indexDoc = await G.api('git.show', { ...gitBody, path: change.path, rev: 'index' })
           rightContent = typeof indexDoc.text === 'string' ? indexDoc.text : ''
         } catch {
           rightContent = ''
         }
       }
       const tab = {
-        path: change.path,
+        path: wsPath,
         title: `${G.basename(change.path)}（${change.staged === true ? '暂存区' : '工作树'}）`,
         kind: 'diff',
         content: rightContent,
@@ -13877,17 +14050,17 @@ G.GufaApp = function GufaApp(props) {
         dirty: false,
         language: file?.language ?? 'plaintext',
         size: file?.size,
-        diff: { left, staged: change.staged === true, editable: change.staged !== true },
+        diff: { left, staged: change.staged === true, editable: change.staged !== true, gitRepo: repoRoot },
         diffKey: Date.now(),
       }
       setTabs((current) => {
-        const index = current.findIndex((item) => item.path === change.path)
+        const index = current.findIndex((item) => item.path === wsPath)
         if (index === -1) return [...current, tab]
         const next = current.slice()
         next[index] = { ...next[index], ...tab }
         return next
       })
-      setActivePath(change.path)
+      setActivePath(wsPath)
       setBanner('')
     } catch (error) {
       setBanner(G.errorText(error))
@@ -15251,8 +15424,8 @@ G.GufaApp = function GufaApp(props) {
         onStatus: setGitStatus,
         onOpenFile: (path) => void openFile(path),
         onOpenDiff: (change) => void openDiffForChange(change),
-        onOpenBranches: (event) => openBranchMenu(event),
-        onOpenGraph: () => openGitGraph(),
+        onOpenBranches: (event, repo) => openBranchMenu(event, repo),
+        onOpenGraph: (repo) => openGitGraph(repo),
         onChanged: () => { setRefreshToken((token) => token + 1) },
       })),
     h('div', { key: 'ssh', style: { display: ui.view === 'ssh' ? 'flex' : 'none', flex: '1 1 auto', minHeight: 0, flexDirection: 'column' } },
@@ -15547,9 +15720,10 @@ G.GufaApp = function GufaApp(props) {
                   : activeTab.kind === 'graph'
                     ? h(G.GitGraphView, {
                         root: project?.root ?? null,
+                        repo: activeTab.gitRepo ?? null,
                         refreshToken: gitRefreshToken,
                         onRefresh: () => setGitRefreshToken((token) => token + 1),
-                        onOpenCommitFile: (commit, file) => void openCommitFile(commit, file),
+                        onOpenCommitFile: (commit, file) => void openCommitFile(commit, file, { path: activeTab.gitRepo, rel: activeTab.gitRepoRel }),
                       })
                   : h(G.EditorPane, {
                       tabs,

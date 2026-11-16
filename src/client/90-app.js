@@ -1002,24 +1002,29 @@ G.GufaApp = function GufaApp(props) {
   }, [])
 
   /* ── Git Graph（提交图标签页） ─────────────────────────────────────── */
-  const openGitGraph = useCallback(() => {
+  const openGitGraph = useCallback((repo) => {
     if (project === null) return
-    const path = 'gufa-graph'
+    const repoPath = repo !== null && repo !== undefined && typeof repo.path === 'string' ? repo.path : null
+    const repoRel = repo !== null && repo !== undefined && typeof repo.rel === 'string' ? repo.rel : ''
+    const path = repoPath !== null && repoRel !== '' ? `gufa-graph:${repoRel}` : 'gufa-graph'
     setTabs((current) => {
-      if (current.some((tab) => tab !== null && tab.path === path)) return current
-      return [...current, { path, title: 'Git Graph', kind: 'graph' }]
+      const existing = current.find((tab) => tab !== null && tab.path === path)
+      if (existing !== undefined) return current.map((tab) => (tab !== null && tab.path === path ? { ...tab, gitRepo: repoPath, gitRepoRel: repoRel } : tab))
+      return [...current, { path, title: 'Git Graph', kind: 'graph', gitRepo: repoPath, gitRepoRel: repoRel }]
     })
     setActivePath(path)
   }, [project])
 
   /* Git Graph：点开某次提交里的文件 → 提交版本 diff（父提交 vs 该提交） */
-  const openCommitFile = useCallback(async (commit, file) => {
+  const openCommitFile = useCallback(async (commit, file, repoCtx) => {
     if (project === null || commit === null || commit === undefined || file === null || file === undefined) return
     if (typeof file.path !== 'string' || file.path === '' || typeof commit.hash !== 'string') return
+    const repoRoot = repoCtx !== null && repoCtx !== undefined && typeof repoCtx.path === 'string' ? repoCtx.path : undefined
+    const repoRel = repoCtx !== null && repoCtx !== undefined && typeof repoCtx.rel === 'string' ? repoCtx.rel : ''
     try {
       const [leftResult, rightResult] = await Promise.all([
-        G.api('git.fileVersion', { root: project.root, path: file.path, hash: commit.hash, parent: true }).catch(() => ({ text: '' })),
-        G.api('git.fileVersion', { root: project.root, path: file.path, hash: commit.hash }).catch(() => ({ text: '' })),
+        G.api('git.fileVersion', { root: project.root, repo: repoRoot, path: file.path, hash: commit.hash, parent: true }).catch(() => ({ text: '' })),
+        G.api('git.fileVersion', { root: project.root, repo: repoRoot, path: file.path, hash: commit.hash }).catch(() => ({ text: '' })),
       ])
       const path = `gufa-commit:${commit.hash.slice(0, 10)}:${file.path}`
       const leftText = typeof leftResult?.text === 'string' ? leftResult.text : ''
@@ -1049,8 +1054,11 @@ G.GufaApp = function GufaApp(props) {
   }, [project])
 
   /* 分支切换 / 新建 ──────────────────────────────────────────────── */
-  const openBranchMenu = useCallback((event) => {
-    if (project === null || project.isGit !== true) return
+  const openBranchMenu = useCallback((event, repo) => {
+    if (project === null) return
+    const repoPath = repo !== null && repo !== undefined && typeof repo.path === 'string' ? repo.path : undefined
+    /* 工作区根目录不是 Git 仓库时，仍允许对子目录仓库切换分支 */
+    if (repoPath === undefined && project.isGit !== true) return
     let placement = { x: 12, top: 40 }
     try {
       const rect = event !== null && event !== undefined && event.currentTarget !== null
@@ -1066,8 +1074,8 @@ G.GufaApp = function GufaApp(props) {
       /* ignore */
     }
     setBranchInput('')
-    setBranchMenu({ ...placement, loading: true, branches: [], error: '' })
-    void G.api('git.branches', { root: project.root })
+    setBranchMenu({ ...placement, repo: repoPath, loading: true, branches: [], error: '' })
+    void G.api('git.branches', { root: project.root, repo: repoPath })
       .then((value) => {
         setBranchMenu((current) => (current === null ? current : { ...current, loading: false, branches: Array.isArray(value?.branches) ? value.branches : [] }))
       })
@@ -1102,7 +1110,7 @@ G.GufaApp = function GufaApp(props) {
   const checkoutBranch = useCallback(async (name) => {
     if (project === null || typeof name !== 'string' || name === '') return
     try {
-      await G.api('git.checkout', { root: project.root, branch: name })
+      await G.api('git.checkout', { root: project.root, repo: branchMenu?.repo, branch: name })
       closeBranchMenu()
       setGitRefreshToken((token) => token + 1)
       setRefreshToken((token) => token + 1)
@@ -1110,14 +1118,14 @@ G.GufaApp = function GufaApp(props) {
     } catch (error) {
       setBranchMenu((current) => (current === null ? current : { ...current, error: G.errorText(error) }))
     }
-  }, [project, closeBranchMenu, refreshGit])
+  }, [project, branchMenu, closeBranchMenu, refreshGit])
 
   const createBranch = useCallback(async () => {
     if (project === null) return
     const name = branchInput.trim()
     if (name === '') return
     try {
-      await G.api('git.createBranch', { root: project.root, name })
+      await G.api('git.createBranch', { root: project.root, repo: branchMenu?.repo, name })
       closeBranchMenu()
       setGitRefreshToken((token) => token + 1)
       setRefreshToken((token) => token + 1)
@@ -1125,7 +1133,7 @@ G.GufaApp = function GufaApp(props) {
     } catch (error) {
       setBranchMenu((current) => (current === null ? current : { ...current, error: G.errorText(error) }))
     }
-  }, [project, branchInput, closeBranchMenu, refreshGit])
+  }, [project, branchMenu, branchInput, closeBranchMenu, refreshGit])
 
   /* ── 删除（无确认弹窗，软删除到临时目录，⌘Z 可撤销） ──────────────── */
   const deleteEntry = useCallback(async (path) => {
@@ -1196,7 +1204,12 @@ G.GufaApp = function GufaApp(props) {
   /* ── Git diff / 两文件对比（Monaco DiffEditor） ────────────────────── */
   const openDiffForChange = useCallback(async (change) => {
     if (project === null || change === null || typeof change !== 'object' || typeof change.path !== 'string') return
-    const existing = tabs.find((item) => item.path === change.path)
+    /* 嵌套仓库：diff 的路径是仓库内相对路径，编辑器/文件读写的 path 需要补上仓库相对工作区的前缀 */
+    const repoRoot = typeof change.repo === 'string' && change.repo !== '' ? change.repo : null
+    const repoRel = typeof change.repoRel === 'string' ? change.repoRel : ''
+    const wsPath = repoRel !== '' ? `${repoRel}/${change.path}` : change.path
+    const gitBody = repoRoot !== null ? { root: project.root, repo: repoRoot } : { root: project.root }
+    const existing = tabs.find((item) => item.path === wsPath)
     if (existing !== undefined && existing !== null && existing.kind !== 'diff' && existing.dirty === true) {
       setBanner('该文件有未保存修改，请先保存后再查看 diff')
       return
@@ -1205,14 +1218,14 @@ G.GufaApp = function GufaApp(props) {
       /* 文件可能已删除（工作树删掉/暂存区删除）：读不到就按空处理，仍然展示差异 */
       let file = null
       try {
-        file = await G.api('fs.read', { root: project.root, path: change.path })
+        file = await G.api('fs.read', { root: project.root, path: wsPath })
       } catch {
         file = null
       }
       let left = ''
       try {
         const shown = await G.api('git.show', {
-          root: project.root,
+          ...gitBody,
           path: change.path,
           rev: change.staged === true ? 'head' : 'index',
         })
@@ -1224,14 +1237,14 @@ G.GufaApp = function GufaApp(props) {
       if (change.staged === true) {
         /* 暂存区 diff = HEAD ↔ 索引；右侧必须用索引内容，而不是工作树（工作树可能还有未暂存改动） */
         try {
-          const indexDoc = await G.api('git.show', { root: project.root, path: change.path, rev: 'index' })
+          const indexDoc = await G.api('git.show', { ...gitBody, path: change.path, rev: 'index' })
           rightContent = typeof indexDoc.text === 'string' ? indexDoc.text : ''
         } catch {
           rightContent = ''
         }
       }
       const tab = {
-        path: change.path,
+        path: wsPath,
         title: `${G.basename(change.path)}（${change.staged === true ? '暂存区' : '工作树'}）`,
         kind: 'diff',
         content: rightContent,
@@ -1240,17 +1253,17 @@ G.GufaApp = function GufaApp(props) {
         dirty: false,
         language: file?.language ?? 'plaintext',
         size: file?.size,
-        diff: { left, staged: change.staged === true, editable: change.staged !== true },
+        diff: { left, staged: change.staged === true, editable: change.staged !== true, gitRepo: repoRoot },
         diffKey: Date.now(),
       }
       setTabs((current) => {
-        const index = current.findIndex((item) => item.path === change.path)
+        const index = current.findIndex((item) => item.path === wsPath)
         if (index === -1) return [...current, tab]
         const next = current.slice()
         next[index] = { ...next[index], ...tab }
         return next
       })
-      setActivePath(change.path)
+      setActivePath(wsPath)
       setBanner('')
     } catch (error) {
       setBanner(G.errorText(error))
@@ -2614,8 +2627,8 @@ G.GufaApp = function GufaApp(props) {
         onStatus: setGitStatus,
         onOpenFile: (path) => void openFile(path),
         onOpenDiff: (change) => void openDiffForChange(change),
-        onOpenBranches: (event) => openBranchMenu(event),
-        onOpenGraph: () => openGitGraph(),
+        onOpenBranches: (event, repo) => openBranchMenu(event, repo),
+        onOpenGraph: (repo) => openGitGraph(repo),
         onChanged: () => { setRefreshToken((token) => token + 1) },
       })),
     h('div', { key: 'ssh', style: { display: ui.view === 'ssh' ? 'flex' : 'none', flex: '1 1 auto', minHeight: 0, flexDirection: 'column' } },
@@ -2910,9 +2923,10 @@ G.GufaApp = function GufaApp(props) {
                   : activeTab.kind === 'graph'
                     ? h(G.GitGraphView, {
                         root: project?.root ?? null,
+                        repo: activeTab.gitRepo ?? null,
                         refreshToken: gitRefreshToken,
                         onRefresh: () => setGitRefreshToken((token) => token + 1),
-                        onOpenCommitFile: (commit, file) => void openCommitFile(commit, file),
+                        onOpenCommitFile: (commit, file) => void openCommitFile(commit, file, { path: activeTab.gitRepo, rel: activeTab.gitRepoRel }),
                       })
                   : h(G.EditorPane, {
                       tabs,

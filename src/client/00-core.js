@@ -235,6 +235,8 @@ const DICT_ZH = {
   'git.branch': '分支',
   'git.changes': '更改',
   'git.noRepo': '当前工作区不是 Git 仓库',
+  'git.repos': 'Git 仓库',
+  'git.workspaceRoot': '工作区根目录',
   'git.noChanges': '工作区干净',
   'git.stage': '暂存',
   'git.unstage': '取消暂存',
@@ -486,6 +488,8 @@ const DICT_EN = {
   'git.branch': 'Branch',
   'git.changes': 'Changes',
   'git.noRepo': 'This workspace is not a Git repository',
+  'git.repos': 'Git repositories',
+  'git.workspaceRoot': 'Workspace root',
   'git.noChanges': 'Working tree clean',
   'git.stage': 'Stage',
   'git.unstage': 'Unstage',
@@ -1821,6 +1825,16 @@ html[data-platform=darwin][data-fullscreen] .gufa-titlebar{height:44px;padding-l
 .gufa-git-status[data-kind="D"]{color:var(--dsw-alias-state-error-primary)}
 .gufa-git-status[data-kind="??"]{color:var(--dsw-alias-state-success-primary)}
 .gufa-git-path{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;direction:rtl;text-align:left}
+.gufa-git-repos{border-bottom:1px solid var(--gufa-border);padding:4px 6px 6px;flex:0 0 auto}
+.gufa-git-repos-head{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;font-size:11px;font-weight:600;color:var(--gufa-text-dim)}
+.gufa-git-repos-list{display:flex;flex-direction:column;gap:1px;max-height:min(30vh,220px);overflow:auto}
+.gufa-git-repo-row{display:flex;align-items:center;gap:7px;width:100%;height:30px;padding:0 7px;border:0;border-radius:6px;background:transparent;color:var(--gufa-text);font:inherit;font-size:12px;cursor:pointer;text-align:left;min-width:0}
+.gufa-git-repo-row:hover{background:var(--gufa-hover)}
+.gufa-git-repo-row[data-active]{background:var(--gufa-active)}
+.gufa-git-repo-meta{display:flex;flex-direction:column;min-width:0;flex:1 1 auto;line-height:1.25}
+.gufa-git-repo-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
+.gufa-git-repo-branch{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:var(--gufa-text-dim)}
+.gufa-git-repo-sync{flex:0 0 auto;font-size:10.5px;color:var(--gufa-text-dim);font-variant-numeric:tabular-nums}
 .gufa-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;border-radius:9px;
   background:var(--gufa-accent);color:#fff;font-size:10px;font-weight:700}
 .gufa-ssh-host{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;cursor:pointer;border-radius:6px;min-width:0}

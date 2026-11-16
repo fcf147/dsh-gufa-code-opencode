@@ -112,6 +112,7 @@ function gufaGraphRow(props) {
 G.GitGraphView = function GitGraphView(props) {
   const t = G.useT()
   const root = typeof props.root === 'string' && props.root !== '' ? props.root : null
+  const repo = typeof props.repo === 'string' && props.repo !== '' ? props.repo : undefined
   const [state, setState] = useState({ status: 'loading', commits: [], branch: '', error: '' })
   const [selected, setSelected] = useState(null)
   const [detail, setDetail] = useState({ status: 'idle', files: [], error: '' })
@@ -125,7 +126,7 @@ G.GitGraphView = function GitGraphView(props) {
     }
     let cancelled = false
     setState((current) => ({ ...current, status: current.commits.length === 0 ? 'loading' : 'refreshing', error: '' }))
-    void G.api('git.graph', { root, all: showAll })
+    void G.api('git.graph', { root, repo, all: showAll })
       .then((value) => {
         if (cancelled) return
         setState({
@@ -142,7 +143,7 @@ G.GitGraphView = function GitGraphView(props) {
     return () => {
       cancelled = true
     }
-  }, [root, props.refreshToken, showAll])
+  }, [root, repo, props.refreshToken, showAll])
 
   /* 选中提交后拉取改动文件列表 */
   useEffect(() => {
@@ -152,7 +153,7 @@ G.GitGraphView = function GitGraphView(props) {
     }
     let cancelled = false
     setDetail({ status: 'loading', files: [], error: '' })
-    void G.api('git.commitFiles', { root, hash: selected.hash })
+    void G.api('git.commitFiles', { root, repo, hash: selected.hash })
       .then((value) => {
         if (cancelled) return
         setDetail({ status: 'ready', files: Array.isArray(value?.files) ? value.files : [], error: '' })
