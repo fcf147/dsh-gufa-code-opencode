@@ -10,7 +10,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { constants } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ApiError, badRequest } from './context.js'
 import { registerLsp } from './lsp.js'
 
@@ -85,6 +86,64 @@ export function languageOf(path) {
 }
 
 /** 项目根内的相对路径解析（拒绝绝对路径、.. 逃逸与符号链接逃逸）。 */
+/** 读取系统剪贴板里的文件/文件夹绝对路径（Finder/资源管理器复制的文件）。 */
+async function readClipboardFilePaths() {
+  try {
+    if (process.platform === 'darwin') {
+      const script = [
+        'ObjC.import("AppKit");',
+        'var pb = $.NSPasteboard.generalPasteboard;',
+        'var urls = pb.readObjectsForClassesOptions($.NSArray.arrayWithObject($.NSURL), $({}));',
+        'var out = [];',
+        'if (urls) { for (var i = 0; i < urls.count; i++) { var u = urls.objectAtIndex(i); if (u && u.fileURL) out.push(ObjC.unwrap(u.path)); } }',
+        'JSON.stringify(out);',
+      ].join('\n')
+      const { stdout } = await runCommand('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 5000, maxBuffer: 2 * 1024 * 1024 })
+      return parseClipboardPaths(stdout)
+    }
+    if (process.platform === 'win32') {
+      const script = [
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;',
+        'Add-Type -AssemblyName System.Windows.Forms;',
+        '$list = [System.Windows.Forms.Clipboard]::GetFileDropList();',
+        '$arr = @(); foreach ($item in $list) { $arr += [string]$item };',
+        'ConvertTo-Json -InputObject $arr -Compress',
+      ].join('\n')
+      const { stdout } = await runCommand('powershell', ['-NoProfile', '-NonInteractive', '-Sta', '-Command', script], { timeout: 6000, maxBuffer: 2 * 1024 * 1024 })
+      return parseClipboardPaths(stdout)
+    }
+    for (const candidate of [
+      ['wl-paste', ['--no-newline', '--type', 'text/uri-list']],
+      ['xclip', ['-selection', 'clipboard', '-t', 'text/uri-list', '-o']],
+    ]) {
+      try {
+        const { stdout } = await runCommand(candidate[0], candidate[1], { timeout: 3000, maxBuffer: 1024 * 1024 })
+        const urls = stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('file://'))
+        if (urls.length > 0) {
+          return urls.map((url) => {
+            try { return fileURLToPath(url) } catch { return '' }
+          }).filter((path) => path !== '')
+        }
+      } catch {
+        /* 尝试下一个剪贴板命令 */
+      }
+    }
+    return []
+  } catch {
+    return []
+  }
+}
+
+function parseClipboardPaths(stdout) {
+  try {
+    const parsed = JSON.parse(String(stdout ?? '').trim() || '[]')
+    const rows = Array.isArray(parsed) ? parsed : (typeof parsed === 'string' ? [parsed] : [])
+    return rows.filter((item) => typeof item === 'string' && item !== '')
+  } catch {
+    return []
+  }
+}
+
 export async function resolveProjectPath(root, raw, { create = false } = {}) {
   if (typeof raw !== 'string') throw badRequest('path must be a string')
   if (isAbsolute(raw)) throw new ApiError('path-invalid', '不允许绝对路径', 400)
@@ -525,6 +584,51 @@ export function register(router, env) {
       copied.push({ from: raw, to: relativePath(root, target) })
     }
     return { copied }
+  })
+
+  /** 把系统剪贴板里复制的文件/文件夹粘贴进项目目录（Finder/资源管理器复制，支持多选和文件夹）。 */
+  router.method('fs.pasteClipboard', async (body) => {
+    const root = await projectOf(env, body)
+    const targetDir = await resolveProjectPath(root, typeof body.to === 'string' && body.to !== '' ? body.to : '')
+    const targetInfo = await stat(targetDir)
+    if (!targetInfo.isDirectory()) throw new ApiError('not-dir', '目标不是目录', 400)
+    const sources = await readClipboardFilePaths()
+    const copied = []
+    const failed = []
+    for (const raw of sources) {
+      if (typeof raw !== 'string' || raw === '') continue
+      const source = resolve(raw)
+      const sourceInfo = await stat(source).catch(() => null)
+      if (sourceInfo === null) {
+        failed.push({ from: raw, error: '文件不存在' })
+        continue
+      }
+      const base = basename(source) || 'item'
+      let name = base
+      let target = join(targetDir, name)
+      let suffix = 1
+      while (await stat(target).then(() => true, () => false)) {
+        name = suffix === 1 ? `${base} 副本` : `${base} 副本 ${suffix}`
+        target = join(targetDir, name)
+        suffix += 1
+        if (suffix > 200) throw new ApiError('copy-name-failed', '无法生成目标文件名', 500)
+      }
+      /* 不允许把目标目录本身/其祖先复制进自己里面 */
+      if (source === targetDir || (sourceInfo.isDirectory() && target.startsWith(source + sep))) {
+        failed.push({ from: raw, error: '不能把文件夹复制到自身内部' })
+        continue
+      }
+      try {
+        await cp(source, target, { recursive: true, errorOnExist: true, force: false })
+        copied.push({ from: raw, to: relativePath(root, target) })
+      } catch (error) {
+        failed.push({ from: raw, error: String(error instanceof Error ? error.message : error).slice(0, 200) })
+      }
+    }
+    if (copied.length === 0 && failed.length === 0) {
+      throw new ApiError('clipboard-empty', '系统剪贴板里没有文件或文件夹', 400)
+    }
+    return { copied, failed }
   })
 
   /** 把系统剪贴板里的文件匹配回项目内已有文件（供聊天框「粘贴文件→@引用」使用）。 */

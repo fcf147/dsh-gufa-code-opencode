@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.206'
+G.BUILD = '1.3.207'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -230,6 +230,8 @@ const DICT_ZH = {
   'explorer.rename': '重命名',
   'explorer.copy': '复制',
   'explorer.paste': '粘贴',
+  'explorer.pasteEmpty': '系统剪贴板里没有可粘贴的文件或文件夹',
+  'explorer.pasteDone': '已粘贴 {count} 项',
   'explorer.revealInFinder': '打开所在文件夹',
   'explorer.compareSelected': '对比',
   'explorer.changedDir': '目录内有改动',
@@ -485,6 +487,8 @@ const DICT_EN = {
   'explorer.rename': 'Rename',
   'explorer.copy': 'Copy',
   'explorer.paste': 'Paste',
+  'explorer.pasteEmpty': 'No files or folders found in the system clipboard',
+  'explorer.pasteDone': 'Pasted {count} item(s)',
   'explorer.revealInFinder': 'Open Containing Folder',
   'explorer.compareSelected': 'Compare',
   'explorer.changedDir': 'Contains changes',
@@ -8142,19 +8146,46 @@ G.Explorer = function Explorer(props) {
     setMenuError('')
   }
 
+  /* 内置剪贴板（IDE 内复制/剪切）优先；没有时读系统剪贴板里的文件/文件夹路径（Finder/资源管理器复制）。 */
   const pasteInto = async (dir) => {
-    if (clipboard === null || clipboard.entries.length === 0) return
     const target = typeof dir === 'string' ? dir : ''
+    if (clipboard !== null && clipboard.entries.length > 0) {
+      try {
+        await G.api('fs.copy', { root, from: clipboard.entries, to: target })
+        setMenuError('')
+        await loadDir(target)
+        await loadDir('')
+        props.onChanged?.()
+      } catch (error) {
+        setMenuError(G.errorText(error))
+      }
+      return
+    }
     try {
-      await G.api('fs.copy', { root, from: clipboard.entries, to: target })
-      setMenuError('')
-      await loadDir(target)
-      await loadDir('')
-      props.onChanged?.()
+      const result = await G.api('fs.pasteClipboard', { root, to: target })
+      const copied = Array.isArray(result?.copied) ? result.copied : []
+      const failed = Array.isArray(result?.failed) ? result.failed : []
+      if (copied.length > 0) {
+        setMenuError('')
+        await loadDir(target)
+        await loadDir('')
+        props.onChanged?.()
+        showNotice(t('explorer.pasteDone').replace('{count}', String(copied.length)))
+      } else {
+        setMenuError(String(failed[0]?.error ?? t('explorer.pasteEmpty')))
+      }
     } catch (error) {
-      setMenuError(G.errorText(error))
+      if (error?.code === 'clipboard-empty') showNotice(t('explorer.pasteEmpty'))
+      else setMenuError(G.errorText(error))
     }
   }
+
+  /* 切到 Finder/资源管理器复制文件时 IDE 会失焦：清掉内置剪贴板，避免 Cmd+V 粘到旧的 IDE 内复制内容 */
+  useEffect(() => {
+    const clear = () => setClipboard(null)
+    window.addEventListener('blur', clear)
+    return () => window.removeEventListener('blur', clear)
+  }, [])
 
   const noticeRef = useRef(0)
   const showNotice = (text) => {
@@ -8370,6 +8401,14 @@ G.Explorer = function Explorer(props) {
           event.preventDefault()
           event.stopPropagation()
           void uploadFiles(files, selectedDir())
+          return
+        }
+        /* 系统剪贴板里复制的是文件/文件夹时，Chromium 的 paste 事件拿不到 files，走 Host 读剪贴板路径 */
+        const types = event.clipboardData?.types
+        if (types !== undefined && types !== null && (Array.from(types).includes('Files') || Array.from(types).includes('text/uri-list'))) {
+          event.preventDefault()
+          event.stopPropagation()
+          void pasteInto(selectedDir())
         }
       },
       onDragOver: (event) => {
@@ -8405,7 +8444,7 @@ G.Explorer = function Explorer(props) {
         if (key === 'c') {
           event.preventDefault()
           copySelection(selectedPaths())
-        } else if (key === 'v' && clipboard !== null) {
+        } else if (key === 'v') {
           event.preventDefault()
           void pasteInto(selectedDir())
         } else if (key === 'backspace' || event.key === 'Delete') {
@@ -8466,9 +8505,7 @@ G.Explorer = function Explorer(props) {
               },
               h(G.MenuItem, { icon: 'plus', label: t('explorer.newFile'), onClick: closeBlank(() => props.onNewFile?.('')) }),
               h(G.MenuItem, { icon: 'folder', label: t('explorer.newFolder'), onClick: closeBlank(() => props.onNewFolder?.('')) }),
-              clipboard !== null
-                ? h(G.MenuItem, { icon: 'folder-open', label: t('explorer.paste'), onClick: closeBlank(() => void pasteInto('')) })
-                : null,
+              h(G.MenuItem, { icon: 'folder-open', label: t('explorer.paste'), onClick: closeBlank(() => void pasteInto('')) }),
               h(G.MenuItem, { icon: 'refresh', label: t('explorer.refresh'), onClick: closeBlank(() => refreshAll()) }),
               h(G.MenuItem, { icon: 'files', label: '全部折叠', onClick: closeBlank(() => setExpanded({})) }),
               h(G.MenuItem, { icon: 'folder-open', label: t('explorer.revealInFinder'), onClick: closeBlank(() => revealPath('')) }),
@@ -8503,9 +8540,7 @@ G.Explorer = function Explorer(props) {
                 })
               : null,
             h(G.MenuItem, { icon: 'files', label: t('explorer.copy'), onClick: closeAnd(() => copySelection(entries.map((item) => item.path))) }),
-            clipboard !== null
-              ? h(G.MenuItem, { icon: 'folder-open', label: t('explorer.paste'), onClick: closeAnd(() => void pasteInto(targetDir)) })
-              : null,
+            h(G.MenuItem, { icon: 'folder-open', label: t('explorer.paste'), onClick: closeAnd(() => void pasteInto(targetDir)) }),
             single
               ? h(G.MenuItem, { icon: 'folder-open', label: t('explorer.revealInFinder'), onClick: closeAnd(() => revealPath(menu.path)) })
               : null,
