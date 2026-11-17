@@ -378,6 +378,29 @@ G.GufaApp = function GufaApp(props) {
   const [workspaceSessions, setWorkspaceSessions] = useState({ status: 'idle', sessions: [], groups: [], sessionIds: [], archivedSessionIds: [] })
   const [workspaceIndex, setWorkspaceIndex] = useState([])
   const [recentCurrentIds, setRecentCurrentIds] = useState([])
+  /* 会话运行状态（与经典侧边栏同源：uiSession.sessionStatus，含 running/pendingInteraction/completionUnread） */
+  const [sessionStatuses, setSessionStatuses] = useState(() => new Map())
+  const [sessionStatusReady, setSessionStatusReady] = useState(false)
+  useEffect(() => {
+    const ui = G.ctx === null || G.ctx === undefined ? undefined : G.ctx.get('uiSession')
+    const source = ui?.sessionStatus
+    if (source === undefined || source === null || typeof source.getSnapshot !== 'function') return undefined
+    setSessionStatusReady(true)
+    const sync = () => {
+      try {
+        const snapshot = source.getSnapshot()
+        if (snapshot instanceof Map) setSessionStatuses(new Map(snapshot))
+      } catch {
+        /* ignore */
+      }
+    }
+    sync()
+    if (typeof source.subscribe !== 'function') return undefined
+    const dispose = source.subscribe(sync)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, [])
   const [sessionGroupOpen, setSessionGroupOpen] = useState({})
   const [workspaceBusy, setWorkspaceBusy] = useState(false)
   const [branchInput, setBranchInput] = useState('')
@@ -3506,6 +3529,18 @@ G.GufaApp = function GufaApp(props) {
             return true
           })
           .map((row) => ({ id: row.id, title: row.title, when: row.when }))
+    /* 会话状态：审批/提问 > 运行中 > 已完成未读 > 空闲（与经典侧边栏一致） */
+    const sessionStatusOf = (id) => {
+      if (sessionStatusReady !== true) return null
+      const status = sessionStatuses instanceof Map ? sessionStatuses.get(id) : undefined
+      const pending = status?.pendingInteraction?.kind
+      if (pending === 'approval') return { kind: 'pending', label: t('session.status.approval') }
+      if (pending === 'plan-review') return { kind: 'pending', label: t('session.status.planReview') }
+      if (pending === 'question') return { kind: 'pending', label: t('session.status.question') }
+      if (status?.running === true) return { kind: 'running', label: t('session.status.running') }
+      if (status?.completionUnread === true) return { kind: 'done', label: t('session.status.done') }
+      return { kind: 'idle', label: t('session.status.idle') }
+    }
     const renderSessionRow = (session, extraKey) =>
       h(
         'button',
@@ -3522,6 +3557,10 @@ G.GufaApp = function GufaApp(props) {
         },
         h(G.Icon, { name: 'message', size: 14 }),
         h('span', { className: 'gufa-session-row-title' }, session.title),
+        (() => {
+          const view = sessionStatusOf(session.id)
+          return view === null ? null : h('span', { className: 'gufa-session-row-status', 'data-kind': view.kind }, view.label)
+        })(),
         typeof session.when === 'number' && session.when > 0 && typeof G.relativeTime === 'function'
           ? h('span', { className: 'gufa-session-row-when' }, G.relativeTime(session.when))
           : null,

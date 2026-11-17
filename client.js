@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.207'
+G.BUILD = '1.3.208'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -112,6 +112,12 @@ const DICT_ZH = {
   'dock.live': '已连接 DSH 会话',
   'dock.newSession': '新建会话',
   'dock.sessions': '切换会话（当前工作区）',
+  'session.status.running': '运行中',
+  'session.status.idle': '空闲',
+  'session.status.done': '已完成',
+  'session.status.approval': '等待审批',
+  'session.status.planReview': '等待审核',
+  'session.status.question': '等待回答',
   'dock.sessionsTitle': '切换会话',
   'shortcuts.title': '古法编程快捷键',
   'shortcuts.save': '保存当前文件',
@@ -378,6 +384,12 @@ const DICT_EN = {
   'dock.live': 'Connected to the DSH session',
   'dock.newSession': 'New session',
   'dock.sessions': 'Switch session (current workspace)',
+  'session.status.running': 'Running',
+  'session.status.idle': 'Idle',
+  'session.status.done': 'Completed',
+  'session.status.approval': 'Waiting approval',
+  'session.status.planReview': 'Waiting review',
+  'session.status.question': 'Waiting answer',
   'dock.sessionsTitle': 'Switch session',
   'shortcuts.title': 'Gufa Code shortcuts',
   'shortcuts.save': 'Save current file',
@@ -1462,6 +1474,11 @@ html[data-gufa-ide] [role="dialog"] {
 .gufa-session-workspace{font-size:11px;color:var(--gufa-text-dim);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gufa-session-row-title{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
 .gufa-session-row-when{flex:0 0 auto;font-size:10.5px;color:var(--gufa-solid-text-dim, var(--dsw-alias-label-secondary));font-variant-numeric:tabular-nums}
+.gufa-session-row-status{flex:0 0 auto;font-size:10.5px;line-height:1.5;padding:0 7px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--gufa-solid-text, #aaa) 9%, transparent);color:var(--gufa-solid-text-dim, var(--dsw-alias-label-secondary))}
+.gufa-session-row-status[data-kind="running"]{color:var(--gufa-accent);background:color-mix(in srgb, var(--gufa-accent) 16%, transparent)}
+.gufa-session-row-status[data-kind="pending"]{color:#f0b429;background:rgba(240,180,41,0.16)}
+.gufa-session-row-status[data-kind="done"]{color:#3fb950;background:rgba(63,185,80,0.15)}
+.gufa-session-row-status[data-kind="idle"]{opacity:.72}
 .gufa-strength-range{-webkit-appearance:none;appearance:none;width:86px;height:3px;border-radius:2px;margin:0;cursor:pointer;outline:none;
   background:color-mix(in srgb, var(--gufa-text) 22%, transparent)}
 /* IDE 模式下：官方 MenuSurface/Menu 弹层通过 portal 挂到 body 且自身没有 z-index，
@@ -13232,6 +13249,29 @@ G.GufaApp = function GufaApp(props) {
   const [workspaceSessions, setWorkspaceSessions] = useState({ status: 'idle', sessions: [], groups: [], sessionIds: [], archivedSessionIds: [] })
   const [workspaceIndex, setWorkspaceIndex] = useState([])
   const [recentCurrentIds, setRecentCurrentIds] = useState([])
+  /* 会话运行状态（与经典侧边栏同源：uiSession.sessionStatus，含 running/pendingInteraction/completionUnread） */
+  const [sessionStatuses, setSessionStatuses] = useState(() => new Map())
+  const [sessionStatusReady, setSessionStatusReady] = useState(false)
+  useEffect(() => {
+    const ui = G.ctx === null || G.ctx === undefined ? undefined : G.ctx.get('uiSession')
+    const source = ui?.sessionStatus
+    if (source === undefined || source === null || typeof source.getSnapshot !== 'function') return undefined
+    setSessionStatusReady(true)
+    const sync = () => {
+      try {
+        const snapshot = source.getSnapshot()
+        if (snapshot instanceof Map) setSessionStatuses(new Map(snapshot))
+      } catch {
+        /* ignore */
+      }
+    }
+    sync()
+    if (typeof source.subscribe !== 'function') return undefined
+    const dispose = source.subscribe(sync)
+    return () => {
+      if (typeof dispose === 'function') dispose()
+    }
+  }, [])
   const [sessionGroupOpen, setSessionGroupOpen] = useState({})
   const [workspaceBusy, setWorkspaceBusy] = useState(false)
   const [branchInput, setBranchInput] = useState('')
@@ -16360,6 +16400,18 @@ G.GufaApp = function GufaApp(props) {
             return true
           })
           .map((row) => ({ id: row.id, title: row.title, when: row.when }))
+    /* 会话状态：审批/提问 > 运行中 > 已完成未读 > 空闲（与经典侧边栏一致） */
+    const sessionStatusOf = (id) => {
+      if (sessionStatusReady !== true) return null
+      const status = sessionStatuses instanceof Map ? sessionStatuses.get(id) : undefined
+      const pending = status?.pendingInteraction?.kind
+      if (pending === 'approval') return { kind: 'pending', label: t('session.status.approval') }
+      if (pending === 'plan-review') return { kind: 'pending', label: t('session.status.planReview') }
+      if (pending === 'question') return { kind: 'pending', label: t('session.status.question') }
+      if (status?.running === true) return { kind: 'running', label: t('session.status.running') }
+      if (status?.completionUnread === true) return { kind: 'done', label: t('session.status.done') }
+      return { kind: 'idle', label: t('session.status.idle') }
+    }
     const renderSessionRow = (session, extraKey) =>
       h(
         'button',
@@ -16376,6 +16428,10 @@ G.GufaApp = function GufaApp(props) {
         },
         h(G.Icon, { name: 'message', size: 14 }),
         h('span', { className: 'gufa-session-row-title' }, session.title),
+        (() => {
+          const view = sessionStatusOf(session.id)
+          return view === null ? null : h('span', { className: 'gufa-session-row-status', 'data-kind': view.kind }, view.label)
+        })(),
         typeof session.when === 'number' && session.when > 0 && typeof G.relativeTime === 'function'
           ? h('span', { className: 'gufa-session-row-when' }, G.relativeTime(session.when))
           : null,

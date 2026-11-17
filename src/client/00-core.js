@@ -104,6 +104,12 @@ const DICT_ZH = {
   'dock.live': '已连接 DSH 会话',
   'dock.newSession': '新建会话',
   'dock.sessions': '切换会话（当前工作区）',
+  'session.status.running': '运行中',
+  'session.status.idle': '空闲',
+  'session.status.done': '已完成',
+  'session.status.approval': '等待审批',
+  'session.status.planReview': '等待审核',
+  'session.status.question': '等待回答',
   'dock.sessionsTitle': '切换会话',
   'shortcuts.title': '古法编程快捷键',
   'shortcuts.save': '保存当前文件',
@@ -370,6 +376,12 @@ const DICT_EN = {
   'dock.live': 'Connected to the DSH session',
   'dock.newSession': 'New session',
   'dock.sessions': 'Switch session (current workspace)',
+  'session.status.running': 'Running',
+  'session.status.idle': 'Idle',
+  'session.status.done': 'Completed',
+  'session.status.approval': 'Waiting approval',
+  'session.status.planReview': 'Waiting review',
+  'session.status.question': 'Waiting answer',
   'dock.sessionsTitle': 'Switch session',
   'shortcuts.title': 'Gufa Code shortcuts',
   'shortcuts.save': 'Save current file',
@@ -1454,6 +1466,11 @@ html[data-gufa-ide] [role="dialog"] {
 .gufa-session-workspace{font-size:11px;color:var(--gufa-text-dim);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gufa-session-row-title{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
 .gufa-session-row-when{flex:0 0 auto;font-size:10.5px;color:var(--gufa-solid-text-dim, var(--dsw-alias-label-secondary));font-variant-numeric:tabular-nums}
+.gufa-session-row-status{flex:0 0 auto;font-size:10.5px;line-height:1.5;padding:0 7px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--gufa-solid-text, #aaa) 9%, transparent);color:var(--gufa-solid-text-dim, var(--dsw-alias-label-secondary))}
+.gufa-session-row-status[data-kind="running"]{color:var(--gufa-accent);background:color-mix(in srgb, var(--gufa-accent) 16%, transparent)}
+.gufa-session-row-status[data-kind="pending"]{color:#f0b429;background:rgba(240,180,41,0.16)}
+.gufa-session-row-status[data-kind="done"]{color:#3fb950;background:rgba(63,185,80,0.15)}
+.gufa-session-row-status[data-kind="idle"]{opacity:.72}
 .gufa-strength-range{-webkit-appearance:none;appearance:none;width:86px;height:3px;border-radius:2px;margin:0;cursor:pointer;outline:none;
   background:color-mix(in srgb, var(--gufa-text) 22%, transparent)}
 /* IDE 模式下：官方 MenuSurface/Menu 弹层通过 portal 挂到 body 且自身没有 z-index，
