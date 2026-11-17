@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.208'
+G.BUILD = '1.3.209'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -112,11 +112,14 @@ const DICT_ZH = {
   'dock.live': '已连接 DSH 会话',
   'dock.newSession': '新建会话',
   'dock.sessions': '切换会话（当前工作区）',
-  'session.status.running': '运行中',
+  'session.status.running': '进行中',
   'session.status.idle': '空闲',
   'session.status.done': '已完成',
   'session.status.approval': '等待审批',
-  'session.status.planReview': '等待审核',
+  'session.status.planReview': '计划待审',
+  'session.status.compact.approval': '待审批',
+  'session.status.compact.planReview': '计划待审',
+  'session.status.compact.question': '待回答',
   'session.status.question': '等待回答',
   'dock.sessionsTitle': '切换会话',
   'shortcuts.title': '古法编程快捷键',
@@ -388,7 +391,10 @@ const DICT_EN = {
   'session.status.idle': 'Idle',
   'session.status.done': 'Completed',
   'session.status.approval': 'Waiting approval',
-  'session.status.planReview': 'Waiting review',
+  'session.status.planReview': 'Plan awaiting review',
+  'session.status.compact.approval': 'Approval',
+  'session.status.compact.planReview': 'Plan review',
+  'session.status.compact.question': 'Answer',
   'session.status.question': 'Waiting answer',
   'dock.sessionsTitle': 'Switch session',
   'shortcuts.title': 'Gufa Code shortcuts',
@@ -1474,11 +1480,13 @@ html[data-gufa-ide] [role="dialog"] {
 .gufa-session-workspace{font-size:11px;color:var(--gufa-text-dim);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gufa-session-row-title{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
 .gufa-session-row-when{flex:0 0 auto;font-size:10.5px;color:var(--gufa-solid-text-dim, var(--dsw-alias-label-secondary));font-variant-numeric:tabular-nums}
-.gufa-session-row-status{flex:0 0 auto;font-size:10.5px;line-height:1.5;padding:0 7px;border-radius:999px;white-space:nowrap;font-variant-numeric:tabular-nums;background:color-mix(in srgb, var(--gufa-solid-text, #aaa) 9%, transparent);color:var(--gufa-solid-text-dim, var(--dsw-alias-label-secondary))}
-.gufa-session-row-status[data-kind="running"]{color:var(--gufa-accent);background:color-mix(in srgb, var(--gufa-accent) 16%, transparent)}
-.gufa-session-row-status[data-kind="pending"]{color:#f0b429;background:rgba(240,180,41,0.16)}
-.gufa-session-row-status[data-kind="done"]{color:#3fb950;background:rgba(63,185,80,0.15)}
-.gufa-session-row-status[data-kind="idle"]{opacity:.72}
+.gufa-session-row-status{width:16px;height:16px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center}
+.gufa-session-state-dot{position:relative;display:inline-block;width:16px;height:16px;color:var(--dsw-alias-state-idle-primary,var(--gufa-solid-text-dim, #8b949e))}
+.gufa-session-state-dot::after{content:"";position:absolute;inset:30%;border-radius:50%;background:currentColor}
+.gufa-session-state-dot[data-state="done"]{color:var(--dsw-alias-state-success-primary,#3fb950)}
+.gufa-session-state-dot[data-state="warning"]{color:var(--dsw-alias-state-warn-primary,#d29922)}
+.gufa-session-state-spinner{display:inline-block;width:13px;height:13px;border-radius:50%;border:1.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, var(--gufa-accent)) 22%, transparent);border-top-color:var(--dsw-alias-state-business-primary, var(--gufa-accent));animation:gufa-session-spin 1s linear infinite}
+@keyframes gufa-session-spin{to{transform:rotate(360deg)}}
 .gufa-strength-range{-webkit-appearance:none;appearance:none;width:86px;height:3px;border-radius:2px;margin:0;cursor:pointer;outline:none;
   background:color-mix(in srgb, var(--gufa-text) 22%, transparent)}
 /* IDE 模式下：官方 MenuSurface/Menu 弹层通过 portal 挂到 body 且自身没有 z-index，
@@ -16400,20 +16408,22 @@ G.GufaApp = function GufaApp(props) {
             return true
           })
           .map((row) => ({ id: row.id, title: row.title, when: row.when }))
-    /* 会话状态：审批/提问 > 运行中 > 已完成未读 > 空闲（与经典侧边栏一致） */
+    /* 会话状态：与经典侧边栏同款（16px 状态点 / 运行中 spinner / 待办用紧凑文案替换时间） */
     const sessionStatusOf = (id) => {
-      if (sessionStatusReady !== true) return null
+      if (sessionStatusReady !== true) return { state: 'idle', label: t('session.status.idle') }
       const status = sessionStatuses instanceof Map ? sessionStatuses.get(id) : undefined
       const pending = status?.pendingInteraction?.kind
-      if (pending === 'approval') return { kind: 'pending', label: t('session.status.approval') }
-      if (pending === 'plan-review') return { kind: 'pending', label: t('session.status.planReview') }
-      if (pending === 'question') return { kind: 'pending', label: t('session.status.question') }
-      if (status?.running === true) return { kind: 'running', label: t('session.status.running') }
-      if (status?.completionUnread === true) return { kind: 'done', label: t('session.status.done') }
-      return { kind: 'idle', label: t('session.status.idle') }
+      if (pending === 'approval') return { state: 'warning', label: t('session.status.approval'), trailing: t('session.status.compact.approval') }
+      if (pending === 'plan-review') return { state: 'warning', label: t('session.status.planReview'), trailing: t('session.status.compact.planReview') }
+      if (pending === 'question') return { state: 'warning', label: t('session.status.question'), trailing: t('session.status.compact.question') }
+      if (status?.running === true) return { state: 'ongoing', label: t('session.status.running') }
+      if (status?.completionUnread === true) return { state: 'done', label: t('session.status.done') }
+      return { state: 'idle', label: t('session.status.idle') }
     }
-    const renderSessionRow = (session, extraKey) =>
-      h(
+    const renderSessionRow = (session, extraKey) => {
+      const view = sessionStatusOf(session.id)
+      const trailing = view?.trailing
+      return h(
         'button',
         {
           key: extraKey,
@@ -16426,16 +16436,27 @@ G.GufaApp = function GufaApp(props) {
             openSessionInWorkspace(session.id, dialogPath)
           },
         },
-        h(G.Icon, { name: 'message', size: 14 }),
+        h(
+          'span',
+          { className: 'gufa-session-row-status' },
+          view !== null && view.state !== 'idle'
+            ? h('span', {
+                className: view.state === 'ongoing' ? 'gufa-session-state-spinner' : 'gufa-session-state-dot',
+                'data-state': view.state,
+                title: view.label,
+                role: 'img',
+                'aria-label': view.label,
+              })
+            : null,
+        ),
         h('span', { className: 'gufa-session-row-title' }, session.title),
-        (() => {
-          const view = sessionStatusOf(session.id)
-          return view === null ? null : h('span', { className: 'gufa-session-row-status', 'data-kind': view.kind }, view.label)
-        })(),
-        typeof session.when === 'number' && session.when > 0 && typeof G.relativeTime === 'function'
-          ? h('span', { className: 'gufa-session-row-when' }, G.relativeTime(session.when))
-          : null,
+        trailing !== undefined
+          ? h('span', { className: 'gufa-session-row-when' }, trailing)
+          : typeof session.when === 'number' && session.when > 0 && typeof G.relativeTime === 'function'
+            ? h('span', { className: 'gufa-session-row-when' }, G.relativeTime(session.when))
+            : null,
       )
+    }
     try {
       if (window.__gufaSessionsDiag === undefined || window.__gufaSessionsDiag > 0) {
         window.__gufaSessionsDiag = (window.__gufaSessionsDiag ?? 3) - 1

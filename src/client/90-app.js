@@ -3529,20 +3529,22 @@ G.GufaApp = function GufaApp(props) {
             return true
           })
           .map((row) => ({ id: row.id, title: row.title, when: row.when }))
-    /* 会话状态：审批/提问 > 运行中 > 已完成未读 > 空闲（与经典侧边栏一致） */
+    /* 会话状态：与经典侧边栏同款（16px 状态点 / 运行中 spinner / 待办用紧凑文案替换时间） */
     const sessionStatusOf = (id) => {
-      if (sessionStatusReady !== true) return null
+      if (sessionStatusReady !== true) return { state: 'idle', label: t('session.status.idle') }
       const status = sessionStatuses instanceof Map ? sessionStatuses.get(id) : undefined
       const pending = status?.pendingInteraction?.kind
-      if (pending === 'approval') return { kind: 'pending', label: t('session.status.approval') }
-      if (pending === 'plan-review') return { kind: 'pending', label: t('session.status.planReview') }
-      if (pending === 'question') return { kind: 'pending', label: t('session.status.question') }
-      if (status?.running === true) return { kind: 'running', label: t('session.status.running') }
-      if (status?.completionUnread === true) return { kind: 'done', label: t('session.status.done') }
-      return { kind: 'idle', label: t('session.status.idle') }
+      if (pending === 'approval') return { state: 'warning', label: t('session.status.approval'), trailing: t('session.status.compact.approval') }
+      if (pending === 'plan-review') return { state: 'warning', label: t('session.status.planReview'), trailing: t('session.status.compact.planReview') }
+      if (pending === 'question') return { state: 'warning', label: t('session.status.question'), trailing: t('session.status.compact.question') }
+      if (status?.running === true) return { state: 'ongoing', label: t('session.status.running') }
+      if (status?.completionUnread === true) return { state: 'done', label: t('session.status.done') }
+      return { state: 'idle', label: t('session.status.idle') }
     }
-    const renderSessionRow = (session, extraKey) =>
-      h(
+    const renderSessionRow = (session, extraKey) => {
+      const view = sessionStatusOf(session.id)
+      const trailing = view?.trailing
+      return h(
         'button',
         {
           key: extraKey,
@@ -3555,16 +3557,27 @@ G.GufaApp = function GufaApp(props) {
             openSessionInWorkspace(session.id, dialogPath)
           },
         },
-        h(G.Icon, { name: 'message', size: 14 }),
+        h(
+          'span',
+          { className: 'gufa-session-row-status' },
+          view !== null && view.state !== 'idle'
+            ? h('span', {
+                className: view.state === 'ongoing' ? 'gufa-session-state-spinner' : 'gufa-session-state-dot',
+                'data-state': view.state,
+                title: view.label,
+                role: 'img',
+                'aria-label': view.label,
+              })
+            : null,
+        ),
         h('span', { className: 'gufa-session-row-title' }, session.title),
-        (() => {
-          const view = sessionStatusOf(session.id)
-          return view === null ? null : h('span', { className: 'gufa-session-row-status', 'data-kind': view.kind }, view.label)
-        })(),
-        typeof session.when === 'number' && session.when > 0 && typeof G.relativeTime === 'function'
-          ? h('span', { className: 'gufa-session-row-when' }, G.relativeTime(session.when))
-          : null,
+        trailing !== undefined
+          ? h('span', { className: 'gufa-session-row-when' }, trailing)
+          : typeof session.when === 'number' && session.when > 0 && typeof G.relativeTime === 'function'
+            ? h('span', { className: 'gufa-session-row-when' }, G.relativeTime(session.when))
+            : null,
       )
+    }
     try {
       if (window.__gufaSessionsDiag === undefined || window.__gufaSessionsDiag > 0) {
         window.__gufaSessionsDiag = (window.__gufaSessionsDiag ?? 3) - 1
