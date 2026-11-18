@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.209'
+G.BUILD = '1.3.210'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -12517,6 +12517,12 @@ G.installShortcutIntegration = function installShortcutIntegration(service) {
 
     // 经典模式：不碰任何 DSH 原生命令
     if (G.mode.get() !== true) {
+      /* IDE 模式退出时把 dispatch 补丁还原，经典模式继续走 DSH 原生派发 */
+      if (registry.__gufaDispatchPatched === true && typeof registry.__gufaOriginalDispatch === 'function') {
+        registry.dispatch = registry.__gufaOriginalDispatch
+        delete registry.__gufaOriginalDispatch
+        delete registry.__gufaDispatchPatched
+      }
       try {
         if (window !== undefined && window !== null) {
           if (window.__gufaClassicShortcutLogs === undefined) window.__gufaClassicShortcutLogs = 3
@@ -12556,6 +12562,22 @@ G.installShortcutIntegration = function installShortcutIntegration(service) {
       'edrv.prevTab': 'prevTab',
       'edrv.nextTab': 'nextTab',
     }
+    /* DSH 升级/用户自定义可能把 Cmd+K 改绑到别的命令 id：以当前快捷键目录为准，
+       把实际占用「主修饰键+K」的命令也改派成 clearTerminal（默认仍是 session.search）。 */
+    try {
+      const rows = registry.catalog !== null && registry.catalog !== undefined && typeof registry.catalog.getSnapshot === 'function'
+        ? registry.catalog.getSnapshot()
+        : []
+      const wanted = G.isMacPlatform() ? '⌘K' : 'Ctrl+K'
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const keys = Array.isArray(row?.keys) ? row.keys : []
+        if (keys.join('') !== wanted) continue
+        if (typeof row?.id !== 'string' || row.id === '') continue
+        if (typeof commandActions[row.id] !== 'string') commandActions[row.id] = 'clearTerminal'
+      }
+    } catch {
+      /* ignore */
+    }
     service.__gufaCommandActions = commandActions
     const wrapped = []
     const commands = registry.commands
@@ -12572,6 +12594,10 @@ G.installShortcutIntegration = function installShortcutIntegration(service) {
               status: 'handled',
               run: () => {
                 try {
+                  if ((window.__gufaCommandRemapLogs ?? 0) < 20) {
+                    window.__gufaCommandRemapLogs = (window.__gufaCommandRemapLogs ?? 0) + 1
+                    void G.api('dev.log', { message: `command-remap ${id} -> ${mapped}` }).catch(() => {})
+                  }
                   if (mapped.startsWith('editor:')) {
                     if (G.bus !== null && G.bus !== undefined) G.bus.emit('editor:command', mapped.slice('editor:'.length))
                     return
@@ -12612,7 +12638,79 @@ G.installShortcutIntegration = function installShortcutIntegration(service) {
         service.__gufaPatchedCommands.push({ command, originalResolve })
         wrapped.push(id)
       }
+      /* 懒加载的命令（例如 workspace 的 session.search 可能晚于插件初始化才注册）：
+         包一次 commands.set，注册时立即补上 resolve 改派，避免 Cmd+K 又退回原生搜索。 */
+      try {
+        if (typeof commands.set === 'function' && commands.__gufaSetPatched !== true) {
+          const originalSet = commands.set
+          commands.set = function gufaShortcutCommandsSet(id, command) {
+            const result = originalSet.call(this, id, command)
+            try {
+              const mapped = service.__gufaCommandActions === null || service.__gufaCommandActions === undefined
+                ? undefined
+                : service.__gufaCommandActions[id]
+              if (typeof mapped === 'string' && command !== null && command !== undefined
+                && typeof command.resolve === 'function' && command.__gufaWrapped !== true) {
+                const originalResolve = command.resolve
+                try {
+                  Object.defineProperty(command, '__gufaOriginalResolve', { value: originalResolve, configurable: true })
+                } catch {
+                  /* ignore */
+                }
+                command.resolve = makeResolve(id, originalResolve)
+                try {
+                  Object.defineProperty(command, '__gufaWrapped', { value: true, configurable: true })
+                } catch {
+                  /* ignore */
+                }
+                if (Array.isArray(service.__gufaPatchedCommands) !== true) service.__gufaPatchedCommands = []
+                service.__gufaPatchedCommands.push({ command, originalResolve })
+              }
+            } catch {
+              /* ignore */
+            }
+            return result
+          }
+          commands.__gufaSetPatched = true
+        }
+      } catch {
+        /* ignore */
+      }
     }
+    /* 兜底：如果 Cmd+K 在 DSH 里存在快捷键冲突，dispatch 会在调用 command.resolve 之前就
+       把按键 consume 掉（表现为快捷键完全没反应）。IDE 模式下直接在 dispatch 最前面接管
+       主修饰键+K → 清空终端，不依赖具体 command id 是否被包到。 */
+    try {
+      if (typeof registry.dispatch === 'function' && registry.__gufaDispatchPatched !== true) {
+        const originalDispatch = registry.dispatch
+        registry.dispatch = function gufaIdeDispatch(gesture, context, consume) {
+          try {
+            if (G.mode.get() === true
+              && typeof document !== 'undefined'
+              && document.querySelector('.gufa-overlay-root') !== null
+              && typeof window.__gufaIdeShortcutDispatch === 'function') {
+              const mac = G.isMacPlatform()
+              const primary = mac ? gesture?.meta === true && gesture?.control !== true : gesture?.control === true
+              if (primary && gesture?.code === 'KeyK' && gesture?.shift !== true && gesture?.alt !== true) {
+                if (typeof consume === 'function') consume()
+                if (gesture?.repeat !== true) {
+                  try { window.__gufaIdeShortcutDispatch('clearTerminal') } catch { /* ignore */ }
+                }
+                return { status: 'handled', commandId: 'gufa.ide.clearTerminal' }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          return originalDispatch.call(this, gesture, context, consume)
+        }
+        registry.__gufaOriginalDispatch = originalDispatch
+        registry.__gufaDispatchPatched = true
+      }
+    } catch {
+      /* ignore */
+    }
+
     // ── 命令表/配置尚未就绪时重试（插件加载可能早于 ui-layout 注册命令）──
     const expected = Object.keys(commandActions).length
     try {
