@@ -115,6 +115,15 @@ dsh plugin add dsh-gufa-code
 - 颜色全部走 DSH 主题 token，亮/暗主题自动跟随；界面宽度、开关状态持久化到 localStorage；
 - 与皮肤插件兼容：如果装有「滑动变祖」这类皮肤，IDE 面板会半透明透出皮肤人像/粒子，编辑器区域也保持轻微透明。
 
+## 更新日志
+
+### 1.3.209（最新）
+
+- **Git 面板支持多个仓库**：自动列出工作区根目录和一级子目录里的全部 Git 仓库，可逐个查看状态、暂存、提交、推送、拉取、切换分支、查看 diff / Git Graph；子目录仓库摘要每 5 秒自动刷新。
+- **Git 还原逻辑修正**：未跟踪的新文件不再报 `pathspec ... did not match`，改为删除文件并二次确认；未跟踪状态显示为 `U`；「撤销所有改动」会连同未跟踪新文件一起删除（保留 `.gitignore` 忽略的文件）。
+- **资源管理器支持系统剪贴板粘贴**：在 Finder / 资源管理器里复制的文件或文件夹，可直接 `Cmd/Ctrl+V` 或右键「粘贴」进当前目录；支持多选、文件夹、同名自动生成「副本」（macOS / Windows / Linux）。
+- **切换会话弹窗显示会话状态**：与经典侧边栏一致——运行中显示 spinner，待审批 / 计划待审 / 待回答显示黄色状态点和紧凑文案，已完成显示绿点，空闲留空。
+
 ## 发布（维护者）
 
 打 tag + 建 GitHub Release 即可自动发布：`publish.yml` 用 npm trusted publishing（OIDC）发 npm 包，`build-float.yml` 编译三平台 helper 并挂到 Release assets。详见 [`docs/RELEASE.md`](docs/RELEASE.md)。
