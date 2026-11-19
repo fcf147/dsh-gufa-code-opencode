@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.213'
+G.BUILD = '1.3.214'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -12692,6 +12692,14 @@ G.installShortcutIntegration = function installShortcutIntegration(service) {
               const mac = G.isMacPlatform()
               const primary = mac ? gesture?.meta === true && gesture?.control !== true : gesture?.control === true
               if (primary && gesture?.code === 'KeyK' && gesture?.shift !== true && gesture?.alt !== true) {
+                try {
+                  if ((window.__gufaDispatchRemapLogs ?? 0) < 20) {
+                    window.__gufaDispatchRemapLogs = (window.__gufaDispatchRemapLogs ?? 0) + 1
+                    void G.api('dev.log', { message: 'command-remap-dispatch KeyK -> clearTerminal' }).catch(() => {})
+                  }
+                } catch {
+                  /* ignore */
+                }
                 if (typeof consume === 'function') consume()
                 if (gesture?.repeat !== true) {
                   try { window.__gufaIdeShortcutDispatch('clearTerminal') } catch { /* ignore */ }
@@ -12757,6 +12765,65 @@ G.installShortcutIntegration = function installShortcutIntegration(service) {
       }
     } catch {
       /* 重试安装失败不影响主流程 */
+    }
+
+    /* ── 自愈：DSH 重连/切换会话/热重载可能重建命令表或丢掉 dispatch 补丁，
+       表现为「一开始 Cmd+K 好用，操作一阵后失效、重启客户端才恢复」。
+       每 1.5s 检查一次，发现补丁丢失就在 IDE 模式下自动重装。 ── */
+    try {
+      if (typeof window !== 'undefined' && window !== null) {
+        if (service.__gufaHealthTimer === undefined || service.__gufaHealthTimer === null) {
+          service.__gufaHealthTimer = window.setInterval(() => {
+            try {
+              if (G.mode.get() !== true) return
+              const registryNow = service.registry
+              if (registryNow === null || registryNow === undefined) return
+              const dispatchOk = registryNow.__gufaDispatchPatched === true
+              let wrapMissing = false
+              const commandsNow = registryNow.commands
+              if (commandsNow !== null && commandsNow !== undefined && typeof commandsNow.get === 'function') {
+                for (const id of Object.keys(service.__gufaCommandActions ?? {})) {
+                  const command = commandsNow.get(id)
+                  if (command !== null && command !== undefined && command.__gufaWrapped !== true) {
+                    wrapMissing = true
+                    break
+                  }
+                }
+              }
+              if (dispatchOk && !wrapMissing) return
+              if ((service.__gufaHealthLogs ?? 0) < 20) {
+                service.__gufaHealthLogs = (service.__gufaHealthLogs ?? 0) + 1
+                void G.api('dev.log', {
+                  message: `shortcut-health-heal dispatch=${dispatchOk} wrapMissing=${wrapMissing} mode=${G.mode.get() === true}`,
+                }).catch(() => {})
+              }
+              try {
+                G.installShortcutIntegration(service)
+              } catch {
+                /* ignore */
+              }
+            } catch {
+              /* ignore */
+            }
+          }, 1500)
+        }
+        if (service.__gufaCatalogSubscribed !== true && service.catalog !== null && service.catalog !== undefined && typeof service.catalog.subscribe === 'function') {
+          service.__gufaCatalogSubscribed = true
+          try {
+            service.catalog.subscribe(() => {
+              try {
+                if (G.mode.get() === true) G.installShortcutIntegration(service)
+              } catch {
+                /* ignore */
+              }
+            })
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
     }
 
     // ── 一次性自检：确认改派在 IDE 模式下真的会执行（不会影响经典模式）──
