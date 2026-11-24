@@ -129,9 +129,28 @@ New-Item -ItemType Junction `
 
 ### 免费模型配额
 
-opencode 走 OpenRouter 免费模型时有每日配额（`free-models-per-day`）。用尽后请求会返回
-error 帧（`code: 'OPENCODE_ERROR'`），IDE 面板正常显示错误、不崩溃。这是外部限制，
-不是链路故障——`scripts/verify-installed-opencode.mjs` 会把这种情况单独识别出来。
+opencode 走 OpenRouter 免费模型时有每日配额。实测（2026-11）：
+
+```
+X-RateLimit-Limit:     50          # 每天 50 次
+X-RateLimit-Remaining: 0           # 已用尽
+X-RateLimit-Reset:     <UTC 次日 00:00>   # 北京时间 08:00 重置
+total_credits:         0           # 账号余额为 0
+```
+
+用尽后请求返回 error 帧（`code: 'OPENCODE_ERROR'`），IDE 面板正常显示错误、不崩溃。
+这是外部限制，不是链路故障——`scripts/verify-installed-opencode.mjs` 会单独识别这种情况。
+
+**排查提示**：先直连探测，排除代理干扰：
+
+```sh
+curl -s -X POST https://openrouter.ai/api/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"model":"nvidia/nemotron-3.5-super-vl:free","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'
+```
+
+看 `X-RateLimit-*` 响应头即可确认是配额问题还是网络/代理问题。
+想立刻恢复：充值 $10 解锁 1000 次/天，或换一个非 `:free` 的模型。
 
 ---
 
