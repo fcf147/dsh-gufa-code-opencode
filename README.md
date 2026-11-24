@@ -30,6 +30,15 @@ dsh plugin add dsh-gufa-code
 
 ## 功能
 
+### Agent 后端：DSH / opencode 可切换
+
+标题栏右侧有一个后端切换按钮（显示当前后端名：`DSH` 或 `opencode`）。点击即在两种 Agent 引擎间切换，选择存在 localStorage，刷新后保持。
+
+- **DSH**（默认）：右侧官方会话面板，行为与原版完全一致。
+- **opencode**：AI 面板改由 [opencode](https://opencode.ai) 的 ACP 引擎驱动，流式输出走同一套 SSE 帧协议，因此 UI 表现一致。opencode 需要写文件/执行命令时会弹审批窗，可选「允许本次」或「拒绝」。
+
+opencode 后端的 CLI 定位顺序：`OPENCODE_BIN` 环境变量 → 插件根目录 `.codebuddy-opencode.json`（`{"bin":"bash","prefixArgs":["<wrapper>"]}`，每次请求时读取，改完不用重启）→ `PATH` 中的 `opencode`。找不到时 AI 面板会明确提示，IDE 其它功能不受影响。
+
 ### 入口与工作区
 
 - 工作区行的 **「…」菜单** 里有「古法编程」（第二项），点它进入 IDE；
