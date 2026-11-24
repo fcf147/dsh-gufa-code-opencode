@@ -12,6 +12,9 @@
  */
 
 import { spawn } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 /** 把 ACP 的一条 session/update 映射为 0..N 个 SSE 帧。 */
 export function updateToFrames(update) {
@@ -155,6 +158,20 @@ export function runOpencodePrompt(options) {
 export function findOpencodeBin(env = process.env) {
   if (typeof env.OPENCODE_BIN === 'string' && env.OPENCODE_BIN !== '') {
     return { bin: env.OPENCODE_BIN, prefixArgs: [] }
+  }
+  // 配置文件：插件 data 目录下的 opencode.json（{ bin, prefixArgs? }），无需重启进程即可生效。
+  // 路径相对插件目录反推到 profile 的 plugin-data（host 每次请求热重载时读取，改配置立即生效）。
+  try {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const configFile = join(here, '..', '.codebuddy-opencode.json')
+    if (existsSync(configFile)) {
+      const config = JSON.parse(readFileSync(configFile, 'utf-8'))
+      if (config !== null && typeof config === 'object' && typeof config.bin === 'string' && config.bin !== '') {
+        return { bin: config.bin, prefixArgs: Array.isArray(config.prefixArgs) ? config.prefixArgs : [] }
+      }
+    }
+  } catch {
+    /* 配置不存在或非法：继续 */
   }
   return null
 }

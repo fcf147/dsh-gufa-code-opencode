@@ -6,3 +6,7 @@ screens/
 
 # 本地 QA 截图（不提交）
 .qa/
+
+# CodeBuddy 融合：本地安装备份与本机配置（不提交）
+.tools/
+.codebuddy-opencode.json
