@@ -64,22 +64,40 @@ opencode Agent 通过左侧 IDE 的 AI 面板提供服务。两种 Agent 并存�
 
 ## 4. opencode CLI 定位
 
-host 启动时按优先级探测：
+`findOpencodeBin()` 按优先级探测：
 1. 环境变量 `OPENCODE_BIN`（绝对路径或 PATH 中的命令）
-2. `scb-release.exe` 自解压后的 CLI（缓存目录）
-3. 常见安装位置（`~/.bun/bin/opencode`、`/usr/local/bin/opencode` 等）
+2. 插件根目录的 `.codebuddy-opencode.json`：`{ "bin": "bash", "prefixArgs": ["<wrapper 绝对路径>"] }`
+   —— 每次请求时读取，**改完不用重启 DSH**（host 按 mtime 热重载）
+3. `PATH` 中的 `opencode`
 
-找不到时 `chat.info` 返回 `ready:false`，AI 面板明确提示，不影响 IDE 其它功能。
+找不到时 `opencode.info` 返回 `ready:false`，AI 面板明确提示，不影响 IDE 其它功能。
+
+本机没有独立 opencode 二进制，用 `scripts/opencode-cli-wrapper.sh`（bun 从源码启动）包一层，
+配置里 `bin: "bash"` + `prefixArgs: [wrapper]` 即可。
 
 ---
 
 ## 5. 里程碑
 
 1. [x] fork 插件、建 `codebuddy-fusion` 分支、研究架构
-2. [ ] 移植 AcpBridge + DomainEvent 为 host ESM 模块，写单测
-3. [ ] 新增 `opencode.stream` SSE 端点，前端可切换后端
-4. [ ] 端到端验证（真实 opencode CLI → client 面板流式文本）
-5. [ ] 打包/分发（插件市场 + 可选单文件）
+2. [x] 移植 AcpBridge 为 host ESM 模块（`host/opencode-bridge.js`），6 个契约单测
+3. [x] 新增 `opencode.stream` SSE 端点 + `opencode.info`，前端运行时切换后端（标题栏按钮）
+4. [x] 审批链路：`permission_request` SSE 帧 + `opencode.permission` 回传 + 端到端落盘验证
+5. [ ] 真机 GUI 交互验证（点标题栏切换 → 面板发消息 → 审批弹窗）
+6. [ ] 打包/分发（插件市场 + 可选单文件）
+
+### 安装到 DSH profile 的正确方式
+
+**不要直接覆盖 `node_modules/dsh-gufa-code`** —— pnpm 会在下次 install 时把它还原成 registry 版本，
+`index.js` 的 `MODULE_FILES` 和 `package.json` 版本都会回退（踩过）。
+
+正确做法：profile 的 `package.json` 里把依赖指到本地 fork：
+
+```json
+"dsh-gufa-code": "file:D:/Desktop/self_codebuddy/dsh-gufa-code"
+```
+
+然后 `pnpm install`。之后改 fork 源码 → 重新 `pnpm install`（或重建 client.js 后 install）即可。
 
 ---
 
@@ -89,3 +107,6 @@ host 启动时按优先级探测：
 - host/*.js 按 mtime 代热重载，改完下一次请求自动生效；但改 `index.js` / `host/context.js` 需重启 DSH。
 - 颜色只用主题 token，文案走 `t()`（i18n）。
 - host 可直接 `import { spawn } from 'node:child_process'`（已有先例：dev.js / app-window.js）。
+- **覆盖 `node_modules` 会被 pnpm 还原**：必须用 profile `package.json` 的 `file:` 依赖（见上）。
+- 审批决策存在 `globalThis.__gufaCodebuddyApprovals__`，跨 host 热重载代保持；60s 无响应默认 reject。
+- `edit` 工具改 CRLF 文件会整体转 LF；需要保 CRLF 时用 Python `newline=''` 或 `\r\n`。
