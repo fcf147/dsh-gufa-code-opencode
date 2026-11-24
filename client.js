@@ -16,7 +16,7 @@ const GUFA_NS = 'gufa-code'
 const G = {}
 G.NS = GUFA_NS
 /** 客户端构建标记（排查页面是否加载了新代码时看标题栏） */
-G.BUILD = '1.3.214'
+G.BUILD = '1.3.215'
 G.PANEL_ID = 'gufa-code'
 /** 从哪个工作区点进来的（工作区菜单/节点按钮写入，App 启动时消费）。 */
 G.pendingEntryWorkspace = null
@@ -299,6 +299,9 @@ const DICT_ZH = {
   'git.branchCurrent': '当前',
   'git.branchNamePlaceholder': '新分支名',
   'git.branchCreate': '新建并切换',
+  'git.branchesLocal': '本地分支',
+  'git.branchesRemote': '远程分支',
+  'git.branchRemoteTag': '远端',
   'git.undoLastCommit': '撤回上次提交（保留改动）',
   'diff.prev': '上一处差异',
   'diff.next': '下一处差异',
@@ -565,6 +568,9 @@ const DICT_EN = {
   'git.branchCurrent': 'current',
   'git.branchNamePlaceholder': 'New branch name',
   'git.branchCreate': 'Create & switch',
+  'git.branchesLocal': 'Local branches',
+  'git.branchesRemote': 'Remote branches',
+  'git.branchRemoteTag': 'remote',
   'git.undoLastCommit': 'Undo last commit (keep changes)',
   'diff.prev': 'Previous change',
   'diff.next': 'Next change',
@@ -1947,6 +1953,10 @@ html[data-platform=darwin][data-fullscreen] .gufa-titlebar{height:44px;padding-l
 .gufa-branch-row{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:7px;
   background:transparent;color:var(--gufa-text);cursor:pointer;font-size:12px;text-align:left}
 .gufa-branch-row:hover{background:var(--gufa-hover)}
+.gufa-branch-group{padding:8px 10px 3px;font-size:10.5px;font-weight:600;letter-spacing:.03em;color:var(--gufa-text-dim);text-transform:uppercase}
+.gufa-branch-row[data-remote]{color:var(--gufa-text-dim)}
+.gufa-branch-row[data-remote]:hover{color:var(--gufa-text)}
+.gufa-branch-tag[data-kind="remote"]{color:var(--gufa-text-dim);border:0.5px solid var(--gufa-border);background:transparent}
 .gufa-branch-row[data-current]{background:color-mix(in srgb, var(--gufa-accent) 16%, transparent)}
 .gufa-branch-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gufa-branch-tag{font-size:10px;padding:1px 6px;border-radius:8px;color:var(--gufa-accent);
@@ -2261,6 +2271,7 @@ const ICON_PATHS = {
     ['path', { d: 'M8 3h7l4 4v10a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z' }],
     ['path', { d: 'M15 3v4h4M3 8v12a1 1 0 0 0 1 1h9' }, { opacity: 0.55 }],
   ],
+  cloud: [['path', { d: 'M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6 11.2 3.6 3.6 0 0 0 7 18z' }]],
   git: [
     ['circle', { cx: 6, cy: 6, r: 2.2 }],
     ['circle', { cx: 6, cy: 18, r: 2.2 }],
@@ -14144,7 +14155,14 @@ G.GufaApp = function GufaApp(props) {
     setBranchMenu({ ...placement, repo: repoPath, loading: true, branches: [], error: '' })
     void G.api('git.branches', { root: project.root, repo: repoPath })
       .then((value) => {
-        setBranchMenu((current) => (current === null ? current : { ...current, loading: false, branches: Array.isArray(value?.branches) ? value.branches : [] }))
+        setBranchMenu((current) => (current === null
+          ? current
+          : {
+              ...current,
+              loading: false,
+              branches: Array.isArray(value?.branches) ? value.branches : [],
+              remotes: Array.isArray(value?.remotes) ? value.remotes : [],
+            }))
       })
       .catch((error) => {
         setBranchMenu((current) => (current === null ? current : { ...current, loading: false, error: G.errorText(error) }))
@@ -14174,10 +14192,10 @@ G.GufaApp = function GufaApp(props) {
     }
   }, [branchMenu, closeBranchMenu])
 
-  const checkoutBranch = useCallback(async (name) => {
+  const checkoutBranch = useCallback(async (name, remote) => {
     if (project === null || typeof name !== 'string' || name === '') return
     try {
-      await G.api('git.checkout', { root: project.root, repo: branchMenu?.repo, branch: name })
+      await G.api('git.checkout', { root: project.root, repo: branchMenu?.repo, branch: name, remote: remote === true })
       closeBranchMenu()
       setGitRefreshToken((token) => token + 1)
       setRefreshToken((token) => token + 1)
@@ -16234,21 +16252,45 @@ G.GufaApp = function GufaApp(props) {
               { className: 'gufa-branch-dialog-list gufa-scroll' },
               ...(branchMenu.loading === true
                 ? []
-                : branchMenu.branches.map((branch) =>
-                    h(
-                      'button',
-                      {
-                        key: branch.name,
-                        type: 'button',
-                        className: 'gufa-branch-row',
-                        'data-current': branch.current === true ? '' : undefined,
-                        onClick: () => void checkoutBranch(branch.name),
-                      },
-                      h(G.Icon, { name: branch.current === true ? 'check' : 'branch', size: 13 }),
-                      h('span', { className: 'gufa-branch-name' }, branch.name),
-                      branch.current === true ? h('span', { className: 'gufa-branch-tag' }, t('git.branchCurrent')) : null,
+                : [
+                    branchMenu.branches.length > 0
+                      ? h('div', { className: 'gufa-branch-group' }, t('git.branchesLocal'))
+                      : null,
+                    ...branchMenu.branches.map((branch) =>
+                      h(
+                        'button',
+                        {
+                          key: `l:${branch.name}`,
+                          type: 'button',
+                          className: 'gufa-branch-row',
+                          'data-current': branch.current === true ? '' : undefined,
+                          onClick: () => void checkoutBranch(branch.name),
+                        },
+                        h(G.Icon, { name: branch.current === true ? 'check' : 'branch', size: 13 }),
+                        h('span', { className: 'gufa-branch-name' }, branch.name),
+                        branch.current === true ? h('span', { className: 'gufa-branch-tag' }, t('git.branchCurrent')) : null,
+                      ),
                     ),
-                  )),
+                    Array.isArray(branchMenu.remotes) && branchMenu.remotes.length > 0
+                      ? h('div', { className: 'gufa-branch-group' }, t('git.branchesRemote'))
+                      : null,
+                    ...(Array.isArray(branchMenu.remotes) ? branchMenu.remotes : []).map((branch) =>
+                      h(
+                        'button',
+                        {
+                          key: `r:${branch.name}`,
+                          type: 'button',
+                          className: 'gufa-branch-row',
+                          'data-remote': '',
+                          title: `${branch.name} → ${branch.short}（创建本地跟踪分支）`,
+                          onClick: () => void checkoutBranch(branch.name, true),
+                        },
+                        h(G.Icon, { name: 'cloud', size: 13 }),
+                        h('span', { className: 'gufa-branch-name' }, branch.name),
+                        h('span', { className: 'gufa-branch-tag', 'data-kind': 'remote' }, t('git.branchRemoteTag')),
+                      ),
+                    ),
+                  ]),
             ),
             h(
               'div',

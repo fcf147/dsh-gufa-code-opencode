@@ -291,6 +291,9 @@ const DICT_ZH = {
   'git.branchCurrent': '当前',
   'git.branchNamePlaceholder': '新分支名',
   'git.branchCreate': '新建并切换',
+  'git.branchesLocal': '本地分支',
+  'git.branchesRemote': '远程分支',
+  'git.branchRemoteTag': '远端',
   'git.undoLastCommit': '撤回上次提交（保留改动）',
   'diff.prev': '上一处差异',
   'diff.next': '下一处差异',
@@ -557,6 +560,9 @@ const DICT_EN = {
   'git.branchCurrent': 'current',
   'git.branchNamePlaceholder': 'New branch name',
   'git.branchCreate': 'Create & switch',
+  'git.branchesLocal': 'Local branches',
+  'git.branchesRemote': 'Remote branches',
+  'git.branchRemoteTag': 'remote',
   'git.undoLastCommit': 'Undo last commit (keep changes)',
   'diff.prev': 'Previous change',
   'diff.next': 'Next change',
@@ -1939,6 +1945,10 @@ html[data-platform=darwin][data-fullscreen] .gufa-titlebar{height:44px;padding-l
 .gufa-branch-row{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:7px;
   background:transparent;color:var(--gufa-text);cursor:pointer;font-size:12px;text-align:left}
 .gufa-branch-row:hover{background:var(--gufa-hover)}
+.gufa-branch-group{padding:8px 10px 3px;font-size:10.5px;font-weight:600;letter-spacing:.03em;color:var(--gufa-text-dim);text-transform:uppercase}
+.gufa-branch-row[data-remote]{color:var(--gufa-text-dim)}
+.gufa-branch-row[data-remote]:hover{color:var(--gufa-text)}
+.gufa-branch-tag[data-kind="remote"]{color:var(--gufa-text-dim);border:0.5px solid var(--gufa-border);background:transparent}
 .gufa-branch-row[data-current]{background:color-mix(in srgb, var(--gufa-accent) 16%, transparent)}
 .gufa-branch-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gufa-branch-tag{font-size:10px;padding:1px 6px;border-radius:8px;color:var(--gufa-accent);

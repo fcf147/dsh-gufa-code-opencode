@@ -1100,7 +1100,14 @@ G.GufaApp = function GufaApp(props) {
     setBranchMenu({ ...placement, repo: repoPath, loading: true, branches: [], error: '' })
     void G.api('git.branches', { root: project.root, repo: repoPath })
       .then((value) => {
-        setBranchMenu((current) => (current === null ? current : { ...current, loading: false, branches: Array.isArray(value?.branches) ? value.branches : [] }))
+        setBranchMenu((current) => (current === null
+          ? current
+          : {
+              ...current,
+              loading: false,
+              branches: Array.isArray(value?.branches) ? value.branches : [],
+              remotes: Array.isArray(value?.remotes) ? value.remotes : [],
+            }))
       })
       .catch((error) => {
         setBranchMenu((current) => (current === null ? current : { ...current, loading: false, error: G.errorText(error) }))
@@ -1130,10 +1137,10 @@ G.GufaApp = function GufaApp(props) {
     }
   }, [branchMenu, closeBranchMenu])
 
-  const checkoutBranch = useCallback(async (name) => {
+  const checkoutBranch = useCallback(async (name, remote) => {
     if (project === null || typeof name !== 'string' || name === '') return
     try {
-      await G.api('git.checkout', { root: project.root, repo: branchMenu?.repo, branch: name })
+      await G.api('git.checkout', { root: project.root, repo: branchMenu?.repo, branch: name, remote: remote === true })
       closeBranchMenu()
       setGitRefreshToken((token) => token + 1)
       setRefreshToken((token) => token + 1)
@@ -3190,21 +3197,45 @@ G.GufaApp = function GufaApp(props) {
               { className: 'gufa-branch-dialog-list gufa-scroll' },
               ...(branchMenu.loading === true
                 ? []
-                : branchMenu.branches.map((branch) =>
-                    h(
-                      'button',
-                      {
-                        key: branch.name,
-                        type: 'button',
-                        className: 'gufa-branch-row',
-                        'data-current': branch.current === true ? '' : undefined,
-                        onClick: () => void checkoutBranch(branch.name),
-                      },
-                      h(G.Icon, { name: branch.current === true ? 'check' : 'branch', size: 13 }),
-                      h('span', { className: 'gufa-branch-name' }, branch.name),
-                      branch.current === true ? h('span', { className: 'gufa-branch-tag' }, t('git.branchCurrent')) : null,
+                : [
+                    branchMenu.branches.length > 0
+                      ? h('div', { className: 'gufa-branch-group' }, t('git.branchesLocal'))
+                      : null,
+                    ...branchMenu.branches.map((branch) =>
+                      h(
+                        'button',
+                        {
+                          key: `l:${branch.name}`,
+                          type: 'button',
+                          className: 'gufa-branch-row',
+                          'data-current': branch.current === true ? '' : undefined,
+                          onClick: () => void checkoutBranch(branch.name),
+                        },
+                        h(G.Icon, { name: branch.current === true ? 'check' : 'branch', size: 13 }),
+                        h('span', { className: 'gufa-branch-name' }, branch.name),
+                        branch.current === true ? h('span', { className: 'gufa-branch-tag' }, t('git.branchCurrent')) : null,
+                      ),
                     ),
-                  )),
+                    Array.isArray(branchMenu.remotes) && branchMenu.remotes.length > 0
+                      ? h('div', { className: 'gufa-branch-group' }, t('git.branchesRemote'))
+                      : null,
+                    ...(Array.isArray(branchMenu.remotes) ? branchMenu.remotes : []).map((branch) =>
+                      h(
+                        'button',
+                        {
+                          key: `r:${branch.name}`,
+                          type: 'button',
+                          className: 'gufa-branch-row',
+                          'data-remote': '',
+                          title: `${branch.name} → ${branch.short}（创建本地跟踪分支）`,
+                          onClick: () => void checkoutBranch(branch.name, true),
+                        },
+                        h(G.Icon, { name: 'cloud', size: 13 }),
+                        h('span', { className: 'gufa-branch-name' }, branch.name),
+                        h('span', { className: 'gufa-branch-tag', 'data-kind': 'remote' }, t('git.branchRemoteTag')),
+                      ),
+                    ),
+                  ]),
             ),
             h(
               'div',

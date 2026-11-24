@@ -489,7 +489,26 @@ export function register(router, env) {
       .map((line) => line.trim())
       .filter((name) => name !== '')
       .map((name) => ({ name, current: name === current }))
-    return { branches }
+    /* 远端分支：refs/remotes/<remote>/<branch>；排除 origin/HEAD 这类符号引用。
+       用于分支弹窗展示与从远端分支创建本地跟踪分支。 */
+    const remotes = (await git(root, ['remote']).catch(() => '')).trim()
+      .split('\n').map((line) => line.trim()).filter(Boolean)
+    const remoteRefs = await git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes']).catch(() => '')
+    const remoteBranches = remoteRefs
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((name) => name !== '' && !name.endsWith('/HEAD'))
+      .map((name) => {
+        const remote = remotes.find((item) => name.startsWith(`${item}/`)) ?? name.split('/')[0]
+        return {
+          name,
+          short: name.slice(remote.length + 1),
+          remote,
+          current: false,
+        }
+      })
+      .filter((branch) => branch.short !== '')
+    return { branches, remotes: remoteBranches }
   })
 
   /** 新建并切换到新分支。 */
@@ -513,8 +532,30 @@ export function register(router, env) {
   router.method('git.checkout', async (body) => {
     const { root } = await repoContext(env, body)
     if (typeof body.branch !== 'string' || body.branch === '') throw badRequest('branch is required')
+    if (body.remote === true) {
+      /* 从远端分支切出本地跟踪分支：origin/feat → feat。
+         若本地已有同名分支则直接切本地分支，不覆盖。 */
+      const remoteRef = body.branch
+      const remotes = (await git(root, ['remote']).catch(() => '')).trim()
+        .split('\n').map((line) => line.trim()).filter(Boolean)
+      const remote = remotes.find((item) => remoteRef.startsWith(`${item}/`))
+      if (remote === undefined) throw badRequest(`无效的远端分支：${remoteRef}`)
+      const short = remoteRef.slice(remote.length + 1)
+      if (short === '') throw badRequest(`无效的远端分支：${remoteRef}`)
+      const localExists = (await git(root, ['branch', '--list', '--format=%(refname:short)', short]).catch(() => '')).trim() !== ''
+      if (localExists) {
+        await git(root, ['checkout', short])
+        return { ok: true, branch: short, tracking: false }
+      }
+      try {
+        await git(root, ['switch', '--track', '-c', short, remoteRef], 60_000)
+      } catch {
+        await git(root, ['checkout', '-b', short, '--track', remoteRef], 60_000)
+      }
+      return { ok: true, branch: short, tracking: true }
+    }
     await git(root, ['checkout', body.branch])
-    return { ok: true }
+    return { ok: true, branch: body.branch }
   })
 
   router.method('git.isRepo', async (body) => {

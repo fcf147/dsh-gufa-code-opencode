@@ -42,6 +42,7 @@ const ICON_PATHS = {
     ['path', { d: 'M8 3h7l4 4v10a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z' }],
     ['path', { d: 'M15 3v4h4M3 8v12a1 1 0 0 0 1 1h9' }, { opacity: 0.55 }],
   ],
+  cloud: [['path', { d: 'M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6 11.2 3.6 3.6 0 0 0 7 18z' }]],
   git: [
     ['circle', { cx: 6, cy: 6, r: 2.2 }],
     ['circle', { cx: 6, cy: 18, r: 2.2 }],

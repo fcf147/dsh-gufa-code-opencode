@@ -340,6 +340,22 @@ try {
   check('discardAll deletes untracked files', allUntrackedGone)
   check('discardAll restores tracked files', restoredMain.content === 'const answer = 42\n', JSON.stringify(restoredMain.content))
 
+  /* 远端分支：列出远端分支，并能从远端分支切出本地跟踪分支 */
+  const bareRemote = join(sandbox, 'origin.git')
+  execFileSync('git', ['init', '--bare', '-q', bareRemote], { cwd: sandbox })
+  execFileSync('git', ['remote', 'add', 'origin', bareRemote], { cwd: projectDir })
+  const baseBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: projectDir, encoding: 'utf8' }).trim()
+  execFileSync('git', ['push', '-q', 'origin', baseBranch], { cwd: projectDir })
+  execFileSync('git', ['branch', 'feature-remote'], { cwd: projectDir })
+  execFileSync('git', ['push', '-q', 'origin', 'feature-remote'], { cwd: projectDir })
+  execFileSync('git', ['branch', '-D', 'feature-remote'], { cwd: projectDir })
+  const branchList = await call(router, 'git.branches', { root })
+  check('git.branches lists remote branches', branchList.remotes.some((branch) => branch.name === 'origin/feature-remote'), JSON.stringify(branchList.remotes.map((branch) => branch.name)))
+  await call(router, 'git.checkout', { root, branch: 'origin/feature-remote', remote: true })
+  const trackedBranches = await call(router, 'git.branches', { root })
+  check('checkout remote creates tracking branch', trackedBranches.branches.some((branch) => branch.name === 'feature-remote' && branch.current === true), JSON.stringify(trackedBranches.branches))
+  await call(router, 'git.checkout', { root, branch: baseBranch })
+
   const gitSearch = await call(router, 'fs.search', { root, query: 'answer' })
   check('search uses git file list', gitSearch.viaGit === true, String(gitSearch.viaGit))
   check('search finds committed file', gitSearch.files.some((file) => file.path === 'src/main.ts'))
