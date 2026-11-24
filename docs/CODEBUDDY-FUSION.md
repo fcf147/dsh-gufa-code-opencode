@@ -81,10 +81,23 @@ opencode Agent 通过左侧 IDE 的 AI 面板提供服务。两种 Agent 并存�
 
 1. [x] fork 插件、建 `codebuddy-fusion` 分支、研究架构
 2. [x] 移植 AcpBridge 为 host ESM 模块（`host/opencode-bridge.js`），6 个契约单测
-3. [x] 新增 `opencode.stream` SSE 端点 + `opencode.info`，前端运行时切换后端（标题栏按钮）
-4. [x] 审批链路：`permission_request` SSE 帧 + `opencode.permission` 回传 + 端到端落盘验证
-5. [ ] 真机 GUI 交互验证（点标题栏切换 → 面板发消息 → 审批弹窗）
-6. [ ] 打包/分发（插件市场 + 可选单文件）
+3. [x] **移植 DomainEvent 反腐层**（`host/domain-event.js`，17 个契约测试）+ **Agent 面板状态机**（`host/agent-panel-machine.js`）
+4. [x] 新增 `opencode.stream` SSE 端点 + `opencode.info`，前端运行时切换后端（标题栏按钮）
+5. [x] 审批链路：`permission_request` SSE 帧 + `opencode.permission` 回传 + 端到端落盘验证
+6. [x] 分发包：`pnpm pack` + 干净目录安装验证（`scripts/verify-tarball.mjs`）
+7. [ ] 真机 GUI 交互验证（点标题栏切换 → 面板发消息 → 审批弹窗）
+8. [ ] 插件市场发布
+
+### 反腐层的作用（为什么要有 domain-event.js）
+
+```
+ACP 原生 session/update ──► domain-event.js ──► DomainEvent ──► 外壳（桥/面板/IDE）
+        ↑                        ↑                    ↑
+   opencode 契约            唯一需要改的地方       稳定自研契约
+```
+
+opencode 升级导致 ACP 契约变化时，只改 `domain-event.js` 的映射，状态机和 UI 完全不动。
+未知事件类型会映射成 `Ignored`（而不是静默丢弃），契约漂移能被测试发现。
 
 ### 安装到 DSH profile 的正确方式
 
@@ -98,6 +111,27 @@ opencode Agent 通过左侧 IDE 的 AI 面板提供服务。两种 Agent 并存�
 ```
 
 然后 `pnpm install`。之后改 fork 源码 → 重新 `pnpm install`（或重建 client.js 后 install）即可。
+
+**但 `file:` 依赖仍是副本，且 pnpm 会缓存** —— 新增文件（如 `host/domain-event.js`）即使 `--force` 也不会同步过去。
+
+开发期最省事的是直接用 **Windows junction** 指向 fork：
+
+```powershell
+Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-gufa-code"
+New-Item -ItemType Junction `
+  -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-gufa-code" `
+  -Target "D:\Desktop\self_codebuddy\dsh-gufa-code"
+```
+
+这样 fork 里改任何文件（含新增）都实时生效，不需要重装。
+注意：junction 之后 `.codebuddy-opencode.json` 要写在 **fork 目录**里（已在 `.gitignore`）。
+`pnpm install` 会覆盖 junction 回副本，重装后需重建 junction。
+
+### 免费模型配额
+
+opencode 走 OpenRouter 免费模型时有每日配额（`free-models-per-day`）。用尽后请求会返回
+error 帧（`code: 'OPENCODE_ERROR'`），IDE 面板正常显示错误、不崩溃。这是外部限制，
+不是链路故障——`scripts/verify-installed-opencode.mjs` 会把这种情况单独识别出来。
 
 ---
 
