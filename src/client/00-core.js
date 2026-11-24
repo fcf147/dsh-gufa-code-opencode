@@ -95,6 +95,35 @@ G.bus = (function createBus() {
   }
 })()
 
+/* ── CodeBuddy 后端选择：dsh(默认) / opencode，localStorage 持久化 ─────── */
+const GUFA_BACKEND_KEY = 'gufa-code:backend'
+G.getBackend = function getBackend() {
+  try {
+    const value = localStorage.getItem(GUFA_BACKEND_KEY)
+    return value === 'opencode' ? 'opencode' : 'dsh'
+  } catch {
+    return 'dsh'
+  }
+}
+G.setBackend = function setBackend(value) {
+  const next = value === 'opencode' ? 'opencode' : 'dsh'
+  try { localStorage.setItem(GUFA_BACKEND_KEY, next) } catch { /* 隐私模式忽略 */ }
+  G.bus.emit('backend:changed', next)
+  return next
+}
+G.chatMethod = function chatMethod() {
+  return G.getBackend() === 'opencode' ? 'opencode.stream' : 'chat.stream'
+}
+G.infoMethod = function infoMethod() {
+  return G.getBackend() === 'opencode' ? 'opencode.info' : 'chat.info'
+}
+
+G.useBackend = function useBackend() {
+  const [backend, setBackendState] = useState(G.getBackend)
+  useEffect(() => G.bus.on('backend:changed', setBackendState), [])
+  return [backend, (value) => setBackendState(G.setBackend(value))]
+}
+
 /* ── i18n：字典走 Client locale 服务；未注册时回落到内置中文 ─────────────── */
 const DICT_ZH = {
   'panel.label': '古法编程',

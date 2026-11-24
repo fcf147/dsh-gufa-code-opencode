@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import { createRouter, ProjectRegistry } from './host/context.js'
 
 const HOST_DIR = join(dirname(fileURLToPath(import.meta.url)), 'host')
-const MODULE_FILES = ['assets.js', 'dev.js', 'project.js', 'fs.js', 'git.js', 'ssh.js', 'terminal.js', 'chat.js']
+const MODULE_FILES = ['assets.js', 'dev.js', 'project.js', 'fs.js', 'git.js', 'ssh.js', 'terminal.js', 'chat.js', 'opencode.js']
 
 function existingModuleFiles() {
   return MODULE_FILES.filter((name) => {

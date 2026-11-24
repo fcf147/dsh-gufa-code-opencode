@@ -103,6 +103,35 @@ G.bus = (function createBus() {
   }
 })()
 
+/* ── CodeBuddy 后端选择：dsh(默认) / opencode，localStorage 持久化 ─────── */
+const GUFA_BACKEND_KEY = 'gufa-code:backend'
+G.getBackend = function getBackend() {
+  try {
+    const value = localStorage.getItem(GUFA_BACKEND_KEY)
+    return value === 'opencode' ? 'opencode' : 'dsh'
+  } catch {
+    return 'dsh'
+  }
+}
+G.setBackend = function setBackend(value) {
+  const next = value === 'opencode' ? 'opencode' : 'dsh'
+  try { localStorage.setItem(GUFA_BACKEND_KEY, next) } catch { /* 隐私模式忽略 */ }
+  G.bus.emit('backend:changed', next)
+  return next
+}
+G.chatMethod = function chatMethod() {
+  return G.getBackend() === 'opencode' ? 'opencode.stream' : 'chat.stream'
+}
+G.infoMethod = function infoMethod() {
+  return G.getBackend() === 'opencode' ? 'opencode.info' : 'chat.info'
+}
+
+G.useBackend = function useBackend() {
+  const [backend, setBackendState] = useState(G.getBackend)
+  useEffect(() => G.bus.on('backend:changed', setBackendState), [])
+  return [backend, (value) => setBackendState(G.setBackend(value))]
+}
+
 /* ── i18n：字典走 Client locale 服务；未注册时回落到内置中文 ─────────────── */
 const DICT_ZH = {
   'panel.label': '古法编程',
@@ -7154,23 +7183,30 @@ G.ChatPanel = function ChatPanel(props) {
   /* ── 模型信息（chat.info） ────────────────────────────────────────── */
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      try {
-        const value = await G.api('chat.info')
-        if (cancelled) return
-        setInfo({
-          provider: value !== null && typeof value === 'object' && typeof value.provider === 'string' ? value.provider : '',
-          model: value !== null && typeof value === 'object' && typeof value.model === 'string' ? value.model : '',
-          ready: value !== null && typeof value === 'object' && value.ready === true,
-        })
-        setInfoError('')
-      } catch (error) {
-        if (!cancelled) setInfoError(G.errorText(error))
-      }
-    })()
-    return () => {
-      cancelled = true
+    const loadInfo = () => {
+      void (async () => {
+        try {
+          const value = await G.api(G.infoMethod())
+          if (cancelled) return
+          if (G.getBackend() === 'opencode') {
+            const bin = value !== null && typeof value === 'object' && typeof value.bin === 'string' ? value.bin : 'opencode'
+            setInfo({ provider: 'opencode', model: bin.split(/[\/]/).pop() || 'opencode', ready: value?.ready === true })
+          } else {
+            setInfo({
+              provider: value !== null && typeof value === 'object' && typeof value.provider === 'string' ? value.provider : '',
+              model: value !== null && typeof value === 'object' && typeof value.model === 'string' ? value.model : '',
+              ready: value !== null && typeof value === 'object' && value.ready === true,
+            })
+          }
+          setInfoError('')
+        } catch (error) {
+          if (!cancelled) setInfoError(G.errorText(error))
+        }
+      })()
     }
+    loadInfo()
+    const off = G.bus.on('backend:changed', loadInfo)
+    return () => { cancelled = true; off?.() }
   }, [])
 
   /* ── 会话库读写 ───────────────────────────────────────────────────── */
@@ -7383,7 +7419,7 @@ G.ChatPanel = function ChatPanel(props) {
     streamRef.current = { conversationId: updated.id, assistantId, abort: null }
     armWatchdog(updated.id, assistantId)
     try {
-      const abort = G.stream('chat.stream', payload, (event) => handleStreamEvent(updated.id, assistantId, event))
+      const abort = G.stream(G.chatMethod(), payload, (event) => handleStreamEvent(updated.id, assistantId, event))
       const current = streamRef.current
       if (current !== null && current.assistantId === assistantId) current.abort = abort
     } catch (error) {
@@ -13296,6 +13332,7 @@ G.GufaApp = function GufaApp(props) {
       /* ignore */
     }
   }, [solidPalette])
+  const [agentBackend, setAgentBackend] = G.useBackend()
   const [backdropOn, setBackdropOn] = useState(() => G.backdropPref.get())
   const [backdropStrength, setBackdropStrength] = useState(() => (
     G.backdropStrengthPref !== null && G.backdropStrengthPref !== undefined && typeof G.backdropStrengthPref.get === 'function'
@@ -15876,6 +15913,15 @@ G.GufaApp = function GufaApp(props) {
       h(
         'div',
         { className: 'gufa-titlebar-actions' },
+        h(
+          G.Button,
+          {
+            icon: 'chevron-down',
+            title: 'AI 后端：点击切换 DSH / opencode',
+            onClick: () => setAgentBackend(agentBackend === 'opencode' ? 'dsh' : 'opencode'),
+          },
+          agentBackend === 'opencode' ? 'opencode' : 'DSH',
+        ),
         moyuMode
           ? h(
               'label',

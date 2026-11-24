@@ -241,6 +241,7 @@ G.GufaApp = function GufaApp(props) {
       /* ignore */
     }
   }, [solidPalette])
+  const [agentBackend, setAgentBackend] = G.useBackend()
   const [backdropOn, setBackdropOn] = useState(() => G.backdropPref.get())
   const [backdropStrength, setBackdropStrength] = useState(() => (
     G.backdropStrengthPref !== null && G.backdropStrengthPref !== undefined && typeof G.backdropStrengthPref.get === 'function'
@@ -2821,6 +2822,15 @@ G.GufaApp = function GufaApp(props) {
       h(
         'div',
         { className: 'gufa-titlebar-actions' },
+        h(
+          G.Button,
+          {
+            icon: 'chevron-down',
+            title: 'AI 后端：点击切换 DSH / opencode',
+            onClick: () => setAgentBackend(agentBackend === 'opencode' ? 'dsh' : 'opencode'),
+          },
+          agentBackend === 'opencode' ? 'opencode' : 'DSH',
+        ),
         moyuMode
           ? h(
               'label',

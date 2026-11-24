@@ -580,23 +580,30 @@ G.ChatPanel = function ChatPanel(props) {
   /* ── 模型信息（chat.info） ────────────────────────────────────────── */
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      try {
-        const value = await G.api('chat.info')
-        if (cancelled) return
-        setInfo({
-          provider: value !== null && typeof value === 'object' && typeof value.provider === 'string' ? value.provider : '',
-          model: value !== null && typeof value === 'object' && typeof value.model === 'string' ? value.model : '',
-          ready: value !== null && typeof value === 'object' && value.ready === true,
-        })
-        setInfoError('')
-      } catch (error) {
-        if (!cancelled) setInfoError(G.errorText(error))
-      }
-    })()
-    return () => {
-      cancelled = true
+    const loadInfo = () => {
+      void (async () => {
+        try {
+          const value = await G.api(G.infoMethod())
+          if (cancelled) return
+          if (G.getBackend() === 'opencode') {
+            const bin = value !== null && typeof value === 'object' && typeof value.bin === 'string' ? value.bin : 'opencode'
+            setInfo({ provider: 'opencode', model: bin.split(/[\/]/).pop() || 'opencode', ready: value?.ready === true })
+          } else {
+            setInfo({
+              provider: value !== null && typeof value === 'object' && typeof value.provider === 'string' ? value.provider : '',
+              model: value !== null && typeof value === 'object' && typeof value.model === 'string' ? value.model : '',
+              ready: value !== null && typeof value === 'object' && value.ready === true,
+            })
+          }
+          setInfoError('')
+        } catch (error) {
+          if (!cancelled) setInfoError(G.errorText(error))
+        }
+      })()
     }
+    loadInfo()
+    const off = G.bus.on('backend:changed', loadInfo)
+    return () => { cancelled = true; off?.() }
   }, [])
 
   /* ── 会话库读写 ───────────────────────────────────────────────────── */
@@ -809,7 +816,7 @@ G.ChatPanel = function ChatPanel(props) {
     streamRef.current = { conversationId: updated.id, assistantId, abort: null }
     armWatchdog(updated.id, assistantId)
     try {
-      const abort = G.stream('chat.stream', payload, (event) => handleStreamEvent(updated.id, assistantId, event))
+      const abort = G.stream(G.chatMethod(), payload, (event) => handleStreamEvent(updated.id, assistantId, event))
       const current = streamRef.current
       if (current !== null && current.assistantId === assistantId) current.abort = abort
     } catch (error) {

@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import * as assets from '../host/assets.js'
 import * as floatPlatform from '../host/float-platform.js'
 import * as chat from '../host/chat.js'
+import * as opencode from '../host/opencode.js'
 import * as code from '../host/code.js'
 import * as fs from '../host/fs.js'
 import * as git from '../host/git.js'
@@ -68,7 +69,7 @@ const sandbox = mkdtempSync(join(tmpdir(), 'gufa-selftest-'))
 const projectDir = join(sandbox, 'demo-project')
 const router = makeRouter()
 const env = { ctx: { get: () => undefined }, projects: new ProjectRegistry() }
-for (const module of [assets, project, fs, git, ssh, terminal, chat, code]) module.register(router, env)
+for (const module of [assets, project, fs, git, ssh, terminal, chat, code, opencode]) module.register(router, env)
 
 try {
   console.log('project.create / project.open')
@@ -544,6 +545,8 @@ try {
   check('xterm asset resolves', xterm !== undefined)
   check('ws channel registered', router.sockets.some((item) => item.channel === 'terminal'))
   check('chat stream registered', router.streams.has('chat.stream'))
+  check('opencode stream registered', router.streams.has('opencode.stream'))
+  check('opencode info registered', router.methods.has('opencode.info'))
   check('api method count', router.methods.size >= 20, String(router.methods.size))
 } finally {
   rmSync(sandbox, { recursive: true, force: true })
