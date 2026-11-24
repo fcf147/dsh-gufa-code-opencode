@@ -13,6 +13,8 @@ import * as assets from '../host/assets.js'
 import * as floatPlatform from '../host/float-platform.js'
 import * as chat from '../host/chat.js'
 import * as opencode from '../host/opencode.js'
+import * as domainEvent from '../host/domain-event.js'
+import * as panelMachine from '../host/agent-panel-machine.js'
 import * as code from '../host/code.js'
 import * as fs from '../host/fs.js'
 import * as git from '../host/git.js'
@@ -547,6 +549,17 @@ try {
   check('chat stream registered', router.streams.has('chat.stream'))
   check('opencode stream registered', router.streams.has('opencode.stream'))
   check('opencode info registered', router.methods.has('opencode.info'))
+  check('opencode permission registered', router.methods.has('opencode.permission'))
+  // 反腐层 + 状态机契约（外壳只消费 DomainEvent）
+  check('domain-event maps text', domainEvent.mapSessionUpdate('s', {
+    sessionUpdate: 'agent_message_chunk', messageId: 'm', content: { text: 'hi' },
+  }).type === 'TextDelta')
+  check('panel machine merges deltas', (() => {
+    let state = panelMachine.initialPanelState
+    state = panelMachine.transition(state, { type: 'TextDelta', sessionId: 's', messageId: 'm', text: 'a', source: 'live' })
+    state = panelMachine.transition(state, { type: 'TextDelta', sessionId: 's', messageId: 'm', text: 'b', source: 'live' })
+    return state.messages.length === 1 && state.messages[0].text === 'ab'
+  })())
   check('api method count', router.methods.size >= 20, String(router.methods.size))
 } finally {
   rmSync(sandbox, { recursive: true, force: true })

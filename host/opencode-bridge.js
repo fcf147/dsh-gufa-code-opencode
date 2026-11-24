@@ -15,20 +15,28 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { mapSessionUpdate, mapPermissionRequest } from './domain-event.js'
 
-/** 把 ACP 的一条 session/update 映射为 0..N 个 SSE 帧。 */
+/**
+ * 把 ACP 的一条 session/update 映射为 0..N 个 SSE 帧。
+ *
+ * 走反腐层：ACP 原生 update → DomainEvent → SSE 帧。
+ * 桥和上层都不直接消费 ACP 类型，OpenCode 契约变了只改 domain-event.js。
+ */
 export function updateToFrames(update) {
   if (update === null || typeof update !== 'object') return []
-  const kind = update.sessionUpdate
-  if (kind === 'agent_message_chunk' || kind === 'user_message_chunk') {
-    const text = update.content !== null && typeof update.content === 'object' && typeof update.content.text === 'string'
-      ? update.content.text
-      : ''
-    return text === '' ? [] : [{ type: 'delta', text }]
+  const event = mapSessionUpdate('', update)
+  switch (event.type) {
+    case 'TextDelta':
+      return event.text === '' ? [] : [{ type: 'delta', text: event.text }]
+    case 'ThoughtDelta':
+      return [{ type: 'thinking' }]
+    case 'Ignored':
+      // config_option_update / available_commands_update 等暂无 UI 需求，静默跳过。
+      return []
+    default:
+      return []
   }
-  if (kind === 'agent_thought_chunk') return [{ type: 'thinking' }]
-  if (kind === 'usage_update' || kind === 'config_option_update' || kind === 'available_commands_update') return []
-  return []
 }
 
 /** 把 prompt 的 stopReason 映射为终止帧。 */
@@ -90,11 +98,16 @@ export function runOpencodePrompt(options) {
       return
     }
     if (message.method === 'session/request_permission') {
-      // 审批：有 onPermission 回调则交给上层（IDE 弹窗），否则保守拒绝。
+      // 审批：走反腐层把 ACP params 转成 PermissionRequested，再交给上层（IDE 弹窗）。
       const id = typeof message.id === 'number' ? message.id : 0
       const params = message.params !== null && typeof message.params === 'object' ? message.params : {}
+      const event = mapPermissionRequest('', params)
       const decide = typeof onPermission === 'function'
-        ? Promise.resolve(onPermission({ id, toolCall: params.toolCall ?? {}, options: params.options ?? [] }))
+        ? Promise.resolve(onPermission({
+            id,
+            toolCall: { name: event.name, toolCallId: event.callId, content: event.diff, rawInput: event.rawInput },
+            options: event.options.map((optionId) => ({ optionId })),
+          }))
         : Promise.resolve('reject')
       void decide.then((optionId) => {
         const choice = optionId === 'once' || optionId === 'always' ? optionId : 'reject'
