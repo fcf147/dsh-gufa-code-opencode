@@ -107,8 +107,10 @@ G.getBackend = function getBackend() {
 }
 G.setBackend = function setBackend(value) {
   const next = value === 'opencode' ? 'opencode' : 'dsh'
+  const previous = G.getBackend()
   try { localStorage.setItem(GUFA_BACKEND_KEY, next) } catch { /* 隐私模式忽略 */ }
-  G.bus.emit('backend:changed', next)
+  // 值没变就不通知：避免无谓的面板重载 / info 重拉。
+  if (next !== previous) G.bus.emit('backend:changed', next)
   return next
 }
 G.chatMethod = function chatMethod() {

@@ -204,6 +204,29 @@ if (G !== undefined) {
   G.mode.set(true)
   check('mode toggle on', G.mode.get() === true && localStorageStub.getItem('gufa-code:mode:v1') === '1')
   G.mode.set(false)
+
+  /* ── CodeBuddy 后端切换：默认值 / 切换 / 持久化 / 方法映射 / 总线事件 ───── */
+  check('backend store present', typeof G.getBackend === 'function' && typeof G.setBackend === 'function')
+  check('chatMethod present', typeof G.chatMethod === 'function' && typeof G.infoMethod === 'function')
+  localStorageStub.removeItem('gufa-code:backend')
+  check('backend default is dsh', G.getBackend() === 'dsh', G.getBackend())
+  check('chatMethod maps dsh', G.chatMethod() === 'chat.stream', G.chatMethod())
+  check('infoMethod maps dsh', G.infoMethod() === 'chat.info', G.infoMethod())
+
+  const backendEvents = []
+  const offBackend = typeof G.bus?.on === 'function' ? G.bus.on('backend:changed', (value) => backendEvents.push(value)) : () => {}
+  G.setBackend('opencode')
+  check('setBackend switches to opencode', G.getBackend() === 'opencode', G.getBackend())
+  check('chatMethod maps opencode', G.chatMethod() === 'opencode.stream', G.chatMethod())
+  check('infoMethod maps opencode', G.infoMethod() === 'opencode.info', G.infoMethod())
+  check('backend persisted to localStorage', localStorageStub.getItem('gufa-code:backend') === 'opencode', String(localStorageStub.getItem('gufa-code:backend')))
+  check('backend:changed emitted once', backendEvents.length === 1 && backendEvents[0] === 'opencode', JSON.stringify(backendEvents))
+  G.setBackend('opencode')
+  check('same value does not re-emit', backendEvents.length === 1, JSON.stringify(backendEvents))
+  G.setBackend('invalid-value')
+  check('invalid value falls back to dsh', G.getBackend() === 'dsh', G.getBackend())
+  if (typeof offBackend === 'function') offBackend()
+  G.setBackend('dsh')
 }
 
 // 通过 fake hooks 直接调用主组件函数体（会执行 hooks 与首次渲染分支）
