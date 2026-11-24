@@ -227,6 +227,31 @@ if (G !== undefined) {
   check('invalid value falls back to dsh', G.getBackend() === 'dsh', G.getBackend())
   if (typeof offBackend === 'function') offBackend()
   G.setBackend('dsh')
+
+  /* ── 客户端 Agent 面板状态机：帧 → 动作（与 host 侧语义一致）───────────── */
+  check('chat transition present', typeof G.chatTransition === 'function')
+  if (typeof G.chatTransition === 'function') {
+    const tr = G.chatTransition
+    check('tr: thinking', tr({ type: 'thinking' }).kind === 'thinking')
+    check('tr: delta appends', tr({ type: 'delta', text: 'abc' }).kind === 'append' && tr({ type: 'delta', text: 'abc' }).text === 'abc')
+    check('tr: empty delta ignored', tr({ type: 'delta', text: '' }).kind === 'ignore')
+    check('tr: missing delta text ignored', tr({ type: 'delta' }).kind === 'ignore')
+    check('tr: permission carries requestId', (() => {
+      const a = tr({ type: 'permission_request', requestId: 7 })
+      return a.kind === 'approval' && a.requestId === 7
+    })())
+    check('tr: done finishes cleanly', (() => {
+      const a = tr({ type: 'done' })
+      return a.kind === 'finish' && a.failed === false
+    })())
+    check('tr: error finishes failed', (() => {
+      const a = tr({ type: 'error', message: 'boom' })
+      return a.kind === 'finish' && a.failed === true && a.message === 'boom'
+    })())
+    check('tr: unknown frame ignored', tr({ type: 'brand_new' }).kind === 'ignore')
+    check('tr: null event ignored', tr(null).kind === 'ignore')
+    check('tr: non-object ignored', tr('str').kind === 'ignore')
+  }
 }
 
 // 通过 fake hooks 直接调用主组件函数体（会执行 hooks 与首次渲染分支）

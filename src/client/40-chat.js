@@ -28,6 +28,40 @@ const GUFA_CHAT_MESSAGE_LIMIT = 120
 const GUFA_CHAT_MESSAGE_CHAR_LIMIT = 60_000
 /** 客户端兜底看门狗：Host 120 秒超时后一定会发终止事件，超过这个时间还没收到就本地收尾。 */
 const GUFA_CHAT_WATCHDOG_MS = 150_000
+
+/* ── Agent 面板状态机（客户端侧精简版）───────────────────────────────────
+ *
+ * 与 host/agent-panel-machine.js 同一套语义：一条 SSE 帧 → 一个动作。
+ * 客户端是拼接产物不能 import，故在此内联；两边契约由各自测试守住。
+ *
+ * 返回 { kind, text?, message?, requestId? }，由调用方执行副作用。
+ * kind: 'thinking' | 'append' | 'approval' | 'finish' | 'ignore'
+ */
+function gufaChatTransition(event) {
+  if (event === null || typeof event !== 'object') return { kind: 'ignore' }
+  switch (event.type) {
+    case 'thinking':
+      return { kind: 'thinking' }
+    case 'delta': {
+      const text = typeof event.text === 'string' ? event.text : ''
+      return text === '' ? { kind: 'ignore' } : { kind: 'append', text }
+    }
+    case 'permission_request':
+      return { kind: 'approval', requestId: event.requestId }
+    case 'error':
+      return {
+        kind: 'finish',
+        message: typeof event.message === 'string' && event.message !== '' ? event.message : '',
+        failed: true,
+      }
+    case 'done':
+      return { kind: 'finish', message: '', failed: false }
+    default:
+      return { kind: 'ignore' }
+  }
+}
+/** 暴露给自测与浏览器控制台排查（纯函数，无副作用）。 */
+G.chatTransition = gufaChatTransition
 const GUFA_CHAT_STORAGE_PREFIX = 'gufa-code:chat:v1:'
 
 /** 核心词典里没有的少量文案（插件以中文为主，缺失 key 时用这里的回退）。 */
@@ -740,40 +774,39 @@ G.ChatPanel = function ChatPanel(props) {
   const handleStreamEvent = useCallback((conversationId, assistantId, event) => {
     const current = streamRef.current
     if (current === null || current.assistantId !== assistantId) return
-    if (event === null || typeof event !== 'object') return
-    if (event.type === 'thinking') {
-      setThinking(true)
-      return
+    // 单一权威：帧如何解释由状态机决定，这里只执行副作用。
+    const action = gufaChatTransition(event)
+    switch (action.kind) {
+      case 'thinking':
+        setThinking(true)
+        return
+      case 'append':
+        setThinking(false)
+        mutateConversation(conversationId, (conversation) => ({
+          ...conversation,
+          messages: conversation.messages.map((message) => (
+            message.id === assistantId ? { ...message, content: `${message.content ?? ''}${action.text}` } : message
+          )),
+        }), false)
+        return
+      case 'approval': {
+        // CodeBuddy: opencode 执行前审批。PoC 用 confirm，后续可换 G.Modal 富界面。
+        setThinking(false)
+        const requestId = action.requestId
+        const tool = typeof event.tool === 'string' ? event.tool : '工具'
+        const diffText = Array.isArray(event.diff) && event.diff.length > 0
+          ? event.diff.map((d) => `${d.path}: ${d.newText}`).join('\n')
+          : ''
+        const allowed = window.confirm(`opencode 请求执行：${tool}\n${diffText}\n\n允许本次执行？`)
+        void G.api('opencode.permission', { requestId, decision: allowed ? 'once' : 'reject' }).catch(() => undefined)
+        return
+      }
+      case 'finish':
+        finishStream(conversationId, assistantId, action.failed ? (action.message !== '' ? action.message : t('chat.error')) : '')
+        return
+      default:
+        return
     }
-    if (event.type === 'delta') {
-      const text = typeof event.text === 'string' ? event.text : ''
-      if (text === '') return
-      setThinking(false)
-      mutateConversation(conversationId, (conversation) => ({
-        ...conversation,
-        messages: conversation.messages.map((message) => (
-          message.id === assistantId ? { ...message, content: `${message.content ?? ''}${text}` } : message
-        )),
-      }), false)
-      return
-    }
-    if (event.type === 'permission_request') {
-      // CodeBuddy: opencode 执行前审批。PoC 用 confirm，后续可换 G.Modal 富界面。
-      setThinking(false)
-      const requestId = event.requestId
-      const tool = typeof event.tool === 'string' ? event.tool : '工具'
-      const diffText = Array.isArray(event.diff) && event.diff.length > 0
-        ? event.diff.map((d) => `${d.path}: ${d.newText}`).join('\n')
-        : ''
-      const allowed = window.confirm(`opencode 请求执行：${tool}\n${diffText}\n\n允许本次执行？`)
-      void G.api('opencode.permission', { requestId, decision: allowed ? 'once' : 'reject' }).catch(() => undefined)
-      return
-    }
-    if (event.type === 'error') {
-      finishStream(conversationId, assistantId, typeof event.message === 'string' && event.message !== '' ? event.message : t('chat.error'))
-      return
-    }
-    if (event.type === 'done') finishStream(conversationId, assistantId, '')
   }, [finishStream, mutateConversation, t])
 
   const armWatchdog = useCallback((conversationId, assistantId) => {
