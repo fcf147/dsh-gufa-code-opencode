@@ -7360,6 +7360,18 @@ G.ChatPanel = function ChatPanel(props) {
       }), false)
       return
     }
+    if (event.type === 'permission_request') {
+      // CodeBuddy: opencode 执行前审批。PoC 用 confirm，后续可换 G.Modal 富界面。
+      setThinking(false)
+      const requestId = event.requestId
+      const tool = typeof event.tool === 'string' ? event.tool : '工具'
+      const diffText = Array.isArray(event.diff) && event.diff.length > 0
+        ? event.diff.map((d) => `${d.path}: ${d.newText}`).join('\n')
+        : ''
+      const allowed = window.confirm(`opencode 请求执行：${tool}\n${diffText}\n\n允许本次执行？`)
+      void G.api('opencode.permission', { requestId, decision: allowed ? 'once' : 'reject' }).catch(() => undefined)
+      return
+    }
     if (event.type === 'error') {
       finishStream(conversationId, assistantId, typeof event.message === 'string' && event.message !== '' ? event.message : t('chat.error'))
       return

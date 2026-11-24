@@ -48,11 +48,13 @@ export function stopReasonToFrame(stopReason) {
  * @param {string} options.cwd                工作目录
  * @param {string} options.prompt             用户输入
  * @param {(frame: object) => void} options.onFrame  SSE 帧回调
+ * @param {(request: { id: number, toolCall: object, options: object[] }) => Promise<string>} [options.onPermission]
+ *        权限决策回调，返回 'once' | 'always' | 'reject'；不传则默认 'reject'
  * @param {AbortSignal} [options.signal]      取消信号
  * @returns {Promise<{ stopReason: string }>}
  */
 export function runOpencodePrompt(options) {
-  const { bin, prefixArgs = [], cwd, prompt, onFrame, signal } = options
+  const { bin, prefixArgs = [], cwd, prompt, onFrame, onPermission, signal } = options
   const child = spawn(bin, [...prefixArgs, 'acp'], { cwd, stdio: ['pipe', 'pipe', 'pipe'] })
   let buffer = ''
   let nextId = 0
@@ -88,10 +90,18 @@ export function runOpencodePrompt(options) {
       return
     }
     if (message.method === 'session/request_permission') {
-      // 默认拒绝：融合路线下 opencode 写文件由插件的 IDE 审批流程接管前，先保守拒绝。
-      if (typeof message.id === 'number') {
-        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: { outcome: { outcome: 'selected', optionId: 'reject' } } })}\n`)
-      }
+      // 审批：有 onPermission 回调则交给上层（IDE 弹窗），否则保守拒绝。
+      const id = typeof message.id === 'number' ? message.id : 0
+      const params = message.params !== null && typeof message.params === 'object' ? message.params : {}
+      const decide = typeof onPermission === 'function'
+        ? Promise.resolve(onPermission({ id, toolCall: params.toolCall ?? {}, options: params.options ?? [] }))
+        : Promise.resolve('reject')
+      void decide.then((optionId) => {
+        const choice = optionId === 'once' || optionId === 'always' ? optionId : 'reject'
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, result: { outcome: { outcome: 'selected', optionId: choice } } })}\n`)
+      }).catch(() => {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, result: { outcome: { outcome: 'selected', optionId: 'reject' } } })}\n`)
+      })
     }
   }
 

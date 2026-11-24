@@ -16,12 +16,31 @@ function textOf(value) {
   return typeof value === 'string' ? value : ''
 }
 
+/** 挂起的审批决策：requestId -> { resolve, timer }；放 globalThis 以跨 host 热重载代保持。 */
+const APPROVALS_KEY = '__gufaCodebuddyApprovals__'
+function approvals() {
+  if (globalThis[APPROVALS_KEY] === undefined) globalThis[APPROVALS_KEY] = new Map()
+  return globalThis[APPROVALS_KEY]
+}
+
 export function register(router, env) {
   const ctx = env.ctx
 
   router.method('opencode.info', () => {
     const found = findOpencodeBin()
     return { ready: found !== null, bin: found === null ? null : found.bin }
+  })
+
+  /** 前端审批弹窗回传决策：{ requestId, decision: 'once'|'always'|'reject' } */
+  router.method('opencode.permission', (body) => {
+    const requestId = body !== null && typeof body === 'object' ? Number(body.requestId) : NaN
+    const decision = body !== null && typeof body === 'object' ? textOf(body.decision) : ''
+    const pending = approvals().get(requestId)
+    if (pending === undefined) return { ok: false, error: '审批请求不存在或已超时' }
+    clearTimeout(pending.timer)
+    approvals().delete(requestId)
+    pending.resolve(decision === 'once' || decision === 'always' ? decision : 'reject')
+    return { ok: true }
   })
 
   router.stream('opencode.stream', async (body, { signal, send, close }) => {
@@ -57,6 +76,30 @@ export function register(router, env) {
         cwd,
         prompt: `${prefix}${prompt}`,
         onFrame: (frame) => send(frame),
+        onPermission: (request) => new Promise((resolve) => {
+          const requestId = request.id
+          const toolCall = request.toolCall !== null && typeof request.toolCall === 'object' ? request.toolCall : {}
+          const options = Array.isArray(request.options) ? request.options : []
+          const diff = Array.isArray(toolCall.content)
+            ? toolCall.content.filter((item) => item !== null && typeof item === 'object' && item.type === 'diff')
+            : []
+          // 通知前端弹审批窗；前端用 opencode.permission 回传决策。
+          send({
+            type: 'permission_request',
+            requestId,
+            tool: textOf(toolCall.name),
+            title: textOf(toolCall.title),
+            diff,
+            options: options.map((o) => textOf(o.optionId)),
+          })
+          const timer = setTimeout(() => {
+            if (approvals().has(requestId)) {
+              approvals().delete(requestId)
+              resolve('reject')
+            }
+          }, 60_000)
+          approvals().set(requestId, { resolve, timer })
+        }),
         signal,
       })
     } catch (error) {

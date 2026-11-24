@@ -10,7 +10,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { updateToFrames, stopReasonToFrame, runOpencodePrompt, findOpencodeBin } from '../host/opencode-bridge.js'
+import { register as registerOpencode } from '../host/opencode.js'
 
 test('updateToFrames：文本/推理/元数据帧契约', () => {
   assert.deepEqual(updateToFrames({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '你好呀' } }),
@@ -33,6 +36,20 @@ test('findOpencodeBin：只读 OPENCODE_BIN 环境变量', () => {
   assert.equal(findOpencodeBin({}), null)
 })
 
+test('opencode.permission：审批回传决策解析', async () => {
+  const methods = new Map()
+  const streams = new Map()
+  registerOpencode(
+    { method: (n, f) => methods.set(n, f), stream: (n, f) => streams.set(n, f) },
+    { ctx: {} },
+  )
+  assert.ok(methods.has('opencode.permission'))
+  assert.ok(streams.has('opencode.stream'))
+  // 未挂起的请求返回失败
+  const missing = await methods.get('opencode.permission')({ requestId: 99999, decision: 'once' })
+  assert.equal(missing.ok, false)
+})
+
 const SHIM = process.env.OPENCODE_TEST_SHIM
 const integration = test('runOpencodePrompt：真实 CLI 文本流', { skip: SHIM ? false : '需 OPENCODE_TEST_SHIM', timeout: 90000 }, async () => {
   const frames = []
@@ -50,3 +67,27 @@ const integration = test('runOpencodePrompt：真实 CLI 文本流', { skip: SHI
 })
 
 void integration
+
+const approvalIntegration = test('审批端到端：权限请求回 once 后文件落盘', { skip: SHIM ? false : '需 OPENCODE_TEST_SHIM', timeout: 90000 }, async () => {
+  const workspace = join(tmpdir(), `gufa-approval-${Date.now()}`)
+  mkdirSync(workspace, { recursive: true })
+  writeFileSync(join(workspace, 'opencode.json'), JSON.stringify({ permission: { write: 'ask' } }))
+  const frames = []
+  let asked = null
+  await runOpencodePrompt({
+    bin: 'bash',
+    prefixArgs: [SHIM],
+    cwd: workspace,
+    prompt: '用 write 工具创建 approved.txt，内容 APPROVED。只做这件事。',
+    onFrame: (f) => frames.push(f),
+    onPermission: (request) => {
+      asked = request
+      return Promise.resolve('once')
+    },
+  })
+  assert.ok(asked !== null, '应收到权限请求')
+  assert.equal(asked.toolCall.name, 'write')
+  assert.ok(frames.some((f) => f.type === 'done' || f.type === 'error'))
+  assert.equal(existsSync(join(workspace, 'approved.txt')), true, '回 once 后文件应落盘')
+})
+void approvalIntegration
