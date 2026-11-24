@@ -14153,7 +14153,7 @@ G.GufaApp = function GufaApp(props) {
     }
     setBranchInput('')
     setBranchMenu({ ...placement, repo: repoPath, loading: true, branches: [], error: '' })
-    void G.api('git.branches', { root: project.root, repo: repoPath })
+    const loadBranches = () => G.api('git.branches', { root: project.root, repo: repoPath })
       .then((value) => {
         setBranchMenu((current) => (current === null
           ? current
@@ -14167,6 +14167,11 @@ G.GufaApp = function GufaApp(props) {
       .catch((error) => {
         setBranchMenu((current) => (current === null ? current : { ...current, loading: false, error: G.errorText(error) }))
       })
+    void loadBranches()
+    /* 远端分支可能只在远端、本地还没 fetch：打开弹窗时后台 fetch 一次再刷新列表 */
+    void G.api('git.fetch', { root: project.root, repo: repoPath })
+      .catch(() => {})
+      .then(() => loadBranches())
   }, [project])
 
   const closeBranchMenu = useCallback(() => {
