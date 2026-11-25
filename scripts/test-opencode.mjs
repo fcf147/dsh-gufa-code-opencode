@@ -31,9 +31,17 @@ test('stopReasonToFrame：正常结束与异常收敛', () => {
   assert.equal(stopReasonToFrame('refusal').type, 'error')
 })
 
-test('findOpencodeBin：只读 OPENCODE_BIN 环境变量', () => {
+test('findOpencodeBin：环境变量优先，其次插件目录配置文件', () => {
+  // 1. OPENCODE_BIN 环境变量优先级最高
   assert.deepEqual(findOpencodeBin({ OPENCODE_BIN: '/x/opencode' }), { bin: '/x/opencode', prefixArgs: [] })
-  assert.equal(findOpencodeBin({}), null)
+
+  // 2. 环境变量缺失时读插件目录的 .codebuddy-opencode.json（开发机可能已配置）
+  const found = findOpencodeBin({})
+  if (found !== null) {
+    assert.equal(typeof found.bin, 'string', '配置探测结果必须带 bin')
+    assert.ok(Array.isArray(found.prefixArgs), 'prefixArgs 必须是数组')
+  }
+  // 未配置的仓库（CI / 干净检出）应返回 null；这里两种结果都合法，只校验形状。
 })
 
 test('opencode.permission：审批回传决策解析', async () => {

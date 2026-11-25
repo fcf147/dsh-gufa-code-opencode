@@ -71,10 +71,11 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node scripts/selftest-client.mjs && node scripts/selftest-host.mjs && node scripts/test-editor.mjs",
+    "test": "node scripts/selftest-client.mjs && node scripts/selftest-host.mjs && node scripts/test-editor.mjs && node --test scripts/test-domain-event.mjs scripts/test-transition-parity.mjs scripts/test-opencode.mjs",
     "build:client": "node scripts/build-client.mjs",
     "build:float:macos": "./scripts/build-float-macos.sh",
     "build:float:linux": "./scripts/build-float-linux.sh",
-    "verify:tarball": "node scripts/verify-tarball.mjs"
+    "verify:tarball": "node scripts/verify-tarball.mjs",
+    "test:codebuddy": "node --test scripts/test-domain-event.mjs scripts/test-transition-parity.mjs scripts/test-opencode.mjs"
   }
 }
