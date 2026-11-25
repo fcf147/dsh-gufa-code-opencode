@@ -85,8 +85,9 @@ opencode Agent 通过左侧 IDE 的 AI 面板提供服务。两种 Agent 并存�
 4. [x] 新增 `opencode.stream` SSE 端点 + `opencode.info`，前端运行时切换后端（标题栏按钮）
 5. [x] 审批链路：`permission_request` SSE 帧 + `opencode.permission` 回传 + 端到端落盘验证
 6. [x] 分发包：`pnpm pack` + 干净目录安装验证（`scripts/verify-tarball.mjs`）
-7. [ ] 真机 GUI 交互验证（点标题栏切换 → 面板发消息 → 审批弹窗）
-8. [ ] 插件市场发布
+7. [x] 全链路验证（本地 mock 上游，不依赖外部配额）
+8. [ ] 真机 GUI 交互验证（需上游可用：点标题栏切换 → 发消息 → 审批弹窗）
+9. [ ] 插件市场发布
 
 ### 反腐层的作用（为什么要有 domain-event.js）
 
@@ -151,6 +152,43 @@ curl -s -X POST https://openrouter.ai/api/v1/chat/completions \
 
 看 `X-RateLimit-*` 响应头即可确认是配额问题还是网络/代理问题。
 想立刻恢复：充值 $10 解锁 1000 次/天，或换一个非 `:free` 的模型。
+
+### 上游不可用时如何验证（重要）
+
+账号可能遇到与代码无关的上游拒绝。实测遇到过：
+
+```
+{"error":{"message":"Request path cannot be relayed","code":400}}
+x-openrouter-error-origin: client
+```
+
+该错误对**所有模型、所有请求形态**（含 `openrouter/auto`、非流式、IPv4 强制）都返回，
+而 `/api/v1/key` 显示 `usage_daily: 0`、`is_free_tier: true`、key 未禁用——
+即配额已重置但请求仍被拒，属账号/地区层面限制，与插件实现无关。
+
+**因此不要依赖真实上游做回归验证**，用本地 mock：
+
+```sh
+# 终端 A：起 mock 上游（OpenAI 兼容，支持流式）
+node scripts/mock-openai-server.mjs 18080
+
+# 终端 B：跑全链路验证
+node scripts/verify-with-mock.mjs 18080
+```
+
+`verify-with-mock.mjs` 会在临时工作目录写一个指向 mock 的 `opencode.json`
+（`providers.mockprovider` + `@opencode/ai/providers/openai-compatible`），
+然后走完整链路：**桥接模块 → ACP 子进程 → HTTP 上游 → 流式解析 → SSE 帧**。
+
+实测输出：
+
+```
+frames: [{"type":"delta","text":"你好呀"},{"type":"done"}]
+stopReason: end_turn
+✓ 全链路通过：桥 → ACP → mock 上游 → 流式帧 → done
+```
+
+这条路径把「我们的实现是否正确」与「上游是否可用」彻底解耦。
 
 ---
 
