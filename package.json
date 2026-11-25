@@ -1,7 +1,7 @@
 {
-  "name": "dsh-gufa-code",
-  "version": "1.3.215",
-  "description": "古法编程 · AI 辅助：一键把 DSH 主面板变成 VS Code 风格 IDE（Monaco 编辑器、文件树、Git、SSH、真实终端 + 右侧官方会话）；主张亲手写、每个改动心中有数，AI 是助理、你是第一责任人",
+  "name": "dsh-gufa-code-opencode",
+  "version": "1.3.215-codebuddy.1",
+  "description": "古法编程 + opencode 后端：DSH 主面板变身 VS Code 风格 IDE（Monaco、文件树、Git、SSH、真实终端），AI 面板可在 DSH / opencode 之间运行时切换（fork 自 dsh-gufa-code，MIT）",
   "icon": "icon.svg",
   "keywords": [
     "dsh",
@@ -13,7 +13,10 @@
     "cursor",
     "ai",
     "terminal",
-    "git"
+    "git",
+    "opencode",
+    "acp",
+    "agent-backend"
   ],
   "type": "module",
   "main": "./index.js",
@@ -55,14 +58,17 @@
     }
   },
   "license": "MIT",
-  "author": "Jeff nan",
+  "author": {
+    "name": "Jeff nan (upstream dsh-gufa-code)",
+    "url": "https://github.com/liujiangnanchenjbguo/dsh-gufa-code"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liujiangnanchenjbguo/dsh-gufa-code.git"
+    "url": "git+https://github.com/fcf147/dsh-gufa-code-opencode.git"
   },
-  "homepage": "https://github.com/liujiangnanchenjbguo/dsh-gufa-code#readme",
+  "homepage": "https://github.com/fcf147/dsh-gufa-code-opencode#readme",
   "bugs": {
-    "url": "https://github.com/liujiangnanchenjbguo/dsh-gufa-code/issues"
+    "url": "https://github.com/fcf147/dsh-gufa-code-opencode/issues"
   },
   "engines": {
     "dsh": ">=0.2.1-rc.1"
@@ -79,5 +85,11 @@
     "test:codebuddy": "node --test scripts/test-domain-event.mjs scripts/test-transition-parity.mjs scripts/test-opencode.mjs",
     "verify:endpoint": "node scripts/verify-stream-endpoint.mjs",
     "verify:context": "node scripts/verify-stream-context.mjs"
-  }
+  },
+  "contributors": [
+    {
+      "name": "fcf147",
+      "url": "https://github.com/fcf147"
+    }
+  ]
 }
