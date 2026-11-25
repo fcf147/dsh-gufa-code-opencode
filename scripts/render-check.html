@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>gufa-code client 渲染验证</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; color: #ddd; font: 13px/1.5 system-ui, sans-serif; }
+  #status { padding: 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  .ok { color: #4ade80; }
+  .fail { color: #f87171; }
+</style>
+</head>
+<body>
+<div id="status">加载中…</div>
+<script>
+/* 最小 ModuleLoader 桩：模拟 DSH 加载插件 client.js 的方式 */
+window.__ModuleLoader__ = {
+  load(definition) { window.__definition = definition },
+}
+window.__testResults = []
+function record(name, pass, detail) {
+  window.__testResults.push({ name, pass, detail })
+  const el = document.getElementById('status')
+  const line = document.createElement('div')
+  line.className = pass ? 'ok' : 'fail'
+  line.textContent = (pass ? '✓ ' : '✗ ') + name + (detail ? ' — ' + detail : '')
+  el.appendChild(line)
+}
+</script>
+<script src="../client.js"></script>
+<script>
+/* 加载完 client.js 后，模拟 Cordis ctx 调用 factory，然后检查 G 上的后端切换 API */
+(function () {
+  const def = window.__definition
+  record('client.js 注册了模块定义', def !== undefined && def.id === 'dsh-gufa-code', def && def.id)
+
+  if (def === undefined) return
+
+  const noop = () => {}
+  const React = {
+    Fragment: Symbol('Fragment'),
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useState: (v) => [typeof v === 'function' ? v() : v, noop],
+    useEffect: noop, useLayoutEffect: noop, useMemo: (f) => f(),
+    useRef: (v) => ({ current: v }), useCallback: (f) => f,
+    useContext: () => ({}), useReducer: (r, i) => [i, noop],
+  }
+  const slotApi = { inject: (o, cb) => cb(), register: () => () => {} }
+  const ctx = {
+    get(name) {
+      if (name === 'locale') return { register: () => () => {}, bind: () => (k) => k, subscribe: () => () => {} }
+      if (name === 'slots') return slotApi
+      if (name === 'layout') return { selectPanel() {} }
+      if (name === 'uiWorkspace') return { pickDirectory: async () => null }
+      return undefined
+    },
+    effect(fn) { const d = fn(); return typeof d === 'function' ? d : () => {} },
+    inject(names, cb) { cb({ slots: slotApi, get: ctx.get, effect: ctx.effect }); return () => {} },
+  }
+
+  let plugin
+  try {
+    plugin = def.factory((name) => {
+      if (name === 'react') return React
+      throw new Error('unexpected require: ' + name)
+    })
+    record('factory 可调用', typeof plugin?.apply === 'function')
+  } catch (e) {
+    record('factory 可调用', false, String(e))
+    return
+  }
+
+  try { plugin.apply(ctx); record('apply 无异常', true) }
+  catch (e) { record('apply 无异常', false, String(e)); return }
+
+  const G = window.__GUFA_CODE__?.G
+  record('暴露调试句柄 G', G !== undefined)
+
+  /* 后端切换 API */
+  record('G.getBackend 存在', typeof G.getBackend === 'function')
+  record('G.setBackend 存在', typeof G.setBackend === 'function')
+  record('G.chatMethod 存在', typeof G.chatMethod === 'function')
+  record('G.infoMethod 存在', typeof G.infoMethod === 'function')
+  record('G.useBackend 存在', typeof G.useBackend === 'function')
+
+  try { localStorage.removeItem('gufa-code:backend') } catch {}
+  record('默认后端为 dsh', G.getBackend() === 'dsh', G.getBackend())
+  record('dsh → chat.stream', G.chatMethod() === 'chat.stream', G.chatMethod())
+  record('dsh → chat.info', G.infoMethod() === 'chat.info', G.infoMethod())
+
+  const events = []
+  const off = G.bus.on('backend:changed', (v) => events.push(v))
+  G.setBackend('opencode')
+  record('切换到 opencode', G.getBackend() === 'opencode', G.getBackend())
+  record('opencode → opencode.stream', G.chatMethod() === 'opencode.stream', G.chatMethod())
+  record('opencode → opencode.info', G.infoMethod() === 'opencode.info', G.infoMethod())
+  record('持久化到 localStorage', localStorage.getItem('gufa-code:backend') === 'opencode', String(localStorage.getItem('gufa-code:backend')))
+  record('发出一次 backend:changed', events.length === 1 && events[0] === 'opencode', JSON.stringify(events))
+  G.setBackend('opencode')
+  record('重复设置不重复通知', events.length === 1, JSON.stringify(events))
+  G.setBackend('乱写')
+  record('非法值回落到 dsh', G.getBackend() === 'dsh', G.getBackend())
+  if (typeof off === 'function') off()
+
+  /* 客户端状态机 */
+  record('G.chatTransition 存在', typeof G.chatTransition === 'function')
+  if (typeof G.chatTransition === 'function') {
+    const tr = G.chatTransition
+    record('帧 thinking', tr({ type: 'thinking' }).kind === 'thinking')
+    record('帧 delta', tr({ type: 'delta', text: 'x' }).kind === 'append')
+    record('帧 done', tr({ type: 'done' }).kind === 'finish')
+    record('帧 error', tr({ type: 'error', message: 'e' }).failed === true)
+    record('帧 permission', tr({ type: 'permission_request', requestId: 3 }).requestId === 3)
+  }
+
+  const failed = window.__testResults.filter((r) => !r.pass).length
+  const total = window.__testResults.length
+  const summary = document.createElement('div')
+  summary.style.cssText = 'margin-top:12px;font-weight:bold'
+  summary.className = failed === 0 ? 'ok' : 'fail'
+  summary.textContent = `${total - failed}/${total} 通过`
+  document.getElementById('status').appendChild(summary)
+  window.__done = true
+})()
+</script>
+</body>
+</html>
