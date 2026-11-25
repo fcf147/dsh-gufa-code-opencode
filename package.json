@@ -76,6 +76,8 @@
     "build:float:macos": "./scripts/build-float-macos.sh",
     "build:float:linux": "./scripts/build-float-linux.sh",
     "verify:tarball": "node scripts/verify-tarball.mjs",
-    "test:codebuddy": "node --test scripts/test-domain-event.mjs scripts/test-transition-parity.mjs scripts/test-opencode.mjs"
+    "test:codebuddy": "node --test scripts/test-domain-event.mjs scripts/test-transition-parity.mjs scripts/test-opencode.mjs",
+    "verify:endpoint": "node scripts/verify-stream-endpoint.mjs",
+    "verify:context": "node scripts/verify-stream-context.mjs"
   }
 }

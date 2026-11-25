@@ -53,7 +53,8 @@ export function register(router, env) {
     const messages = body !== null && typeof body === 'object' && Array.isArray(body.messages) ? body.messages : []
     const lastUser = [...messages].reverse().find((m) => m !== null && typeof m === 'object' && m.role === 'user')
     const prompt = textOf(lastUser !== undefined ? lastUser.content : '')
-    if (prompt === '') {
+    // 纯空白等同于空输入：直接拒绝，不起子进程浪费一次上游调用。
+    if (prompt.trim() === '') {
       send({ type: 'error', message: '请输入问题。', code: 'EMPTY_PROMPT' })
       close()
       return
