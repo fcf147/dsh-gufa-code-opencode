@@ -201,3 +201,46 @@ stopReason: end_turn
 - **覆盖 `node_modules` 会被 pnpm 还原**：必须用 profile `package.json` 的 `file:` 依赖（见上）。
 - 审批决策存在 `globalThis.__gufaCodebuddyApprovals__`，跨 host 热重载代保持；60s 无响应默认 reject。
 - `edit` 工具改 CRLF 文件会整体转 LF；需要保 CRLF 时用 Python `newline=''` 或 `\r\n`。
+
+---
+
+## 7. 可用的上游：Kilo AI 免费池
+
+OpenRouter 免费额度受限后，改用 **Kilo AI** 的免费网关——它**完全不需要凭据**
+（无 key、无登录、无指纹门），OpenAI 兼容，是最省事的可用上游。
+
+```json
+{
+  "model": "kilo/kilo-auto/free",
+  "small_model": "kilo/kilo-auto/free",
+  "providers": {
+    "kilo": {
+      "name": "Kilo AI (free pool)",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": { "baseURL": "https://api.kilo.ai/api/gateway" },
+      "models": { "kilo-auto/free": { "name": "Kilo Auto Free" } }
+    }
+  }
+}
+```
+
+写进 `~/.config/opencode/opencode.json` 即可。验证：
+
+```sh
+node scripts/verify-installed-opencode.mjs
+# frames: [{type:'thinking'},{type:'delta',text:'你好呀'},{type:'done'}]
+# ✓ 已装插件的 opencode 后端端到端可用
+```
+
+**真实环境审批也验证过**（`permission.write: "ask"`）：
+
+```
+收到审批请求: execute
+帧: [thinking, delta('Done.'), done]  stop: end_turn
+文件落盘: true
+```
+
+即：opencode 请求执行权限 → 批准 → 文件真的写出来了。
+
+> 注意：Kilo 免费池的 prompt 可能被上游记录并用于改进服务，
+> 只适合一次性/非敏感任务，不要发密钥或商业机密。
