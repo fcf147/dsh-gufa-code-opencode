@@ -232,6 +232,10 @@ node scripts/verify-installed-opencode.mjs
 # ✓ 已装插件的 opencode 后端端到端可用
 ```
 
+> **注意字段名**：opencode 里 `provider`（单数）是旧的单 provider 配置，
+> `providers`（复数）是新的多 provider 表。两者可以共存、互不覆盖，
+> 所以新增 Kilo 时**不要删掉原来的 `provider.openrouter`**，只加 `providers.kilo` 即可。
+
 **真实环境审批也验证过**（`permission.write: "ask"`）：
 
 ```
