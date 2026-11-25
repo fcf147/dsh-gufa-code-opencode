@@ -1,7 +1,11 @@
-# 古法编程 · AI 辅助（dsh-gufa-code）
+# 古法编程 · AI 辅助（dsh-gufa-code-opencode）
 
 > **古法编程：充分、合理、克制地运用 AI。**
 > 在 DeepSeek Harness 里一键进入 VS Code 风格 IDE：左边是编辑器、文件树和终端，右边就是当前这个 DSH 会话；它改了什么、跑了什么、什么时候等你确认，都在眼前。
+
+> **本包是 [dsh-gufa-code](https://github.com/liujiangnanchenjbguo/dsh-gufa-code) 的 fork**（MIT，原作者 **Jeff nan**），
+> 在原有能力之上新增 **opencode 后端**：AI 面板可在 DSH / opencode 之间运行时切换。
+> 上游的编辑器、文件树、Git、SSH、终端等全部能力原样保留，本项目只做增量。
 
 <p align="center">
   <img src="docs/screenshot-ide.jpg" width="900" alt="古法编程 IDE 模式：左侧资源管理器与 Monaco 编辑器，右侧官方 DSH 会话">
@@ -21,12 +25,42 @@
 ## 安装
 
 ```sh
-dsh plugin add dsh-gufa-code
+dsh plugin add dsh-gufa-code-opencode
 ```
 
-或在 DSH 桌面端 / `dsh web` 的 **插件 → 插件市场** 里搜索「古法编程 / dsh-gufa-code」安装。
+或从源码装：
+
+```sh
+git clone https://github.com/fcf147/dsh-gufa-code-opencode
+cd dsh-gufa-code-opencode
+dsh plugin add .
+```
 
 要求：DeepSeek Harness **0.2.1** 及以上；支持桌面端与浏览器里的 `dsh web`。
+
+### opencode 后端准备
+
+opencode 后端需要一个可用的 CLI 和模型。本包默认按以下顺序查找 CLI：
+`OPENCODE_BIN` 环境变量 → 插件目录 `.codebuddy-opencode.json` → `PATH` 中的 `opencode`。
+
+模型推荐用 **Kilo AI 免费池**（无需任何凭据），写进 `~/.config/opencode/opencode.json`：
+
+```json
+{
+  "model": "kilo/kilo-auto/free",
+  "small_model": "kilo/kilo-auto/free",
+  "providers": {
+    "kilo": {
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": { "baseURL": "https://api.kilo.ai/api/gateway" },
+      "models": { "kilo-auto/free": { "name": "Kilo Auto Free" } }
+    }
+  }
+}
+```
+
+> 注意 `provider`（单数，旧）与 `providers`（复数，新）是两个独立字段，可共存不覆盖。
+> Kilo 免费池的 prompt 可能被上游记录，只适合非敏感任务。
 
 ## 功能
 
