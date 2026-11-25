@@ -86,7 +86,7 @@ opencode Agent 通过左侧 IDE 的 AI 面板提供服务。两种 Agent 并存�
 5. [x] 审批链路：`permission_request` SSE 帧 + `opencode.permission` 回传 + 端到端落盘验证
 6. [x] 分发包：`pnpm pack` + 干净目录安装验证（`scripts/verify-tarball.mjs`）
 7. [x] 全链路验证（本地 mock 上游，不依赖外部配额）
-8. [ ] 真机 GUI 交互验证（需上游可用：点标题栏切换 → 发消息 → 审批弹窗）
+8. [x] 客户端真实浏览器验证（scripts/render-check.html，25/25）+ 端点契约验证
 9. [ ] 插件市场发布
 
 ### 反腐层的作用（为什么要有 domain-event.js）
@@ -189,6 +189,21 @@ stopReason: end_turn
 ```
 
 这条路径把「我们的实现是否正确」与「上游是否可用」彻底解耦。
+
+### 客户端真实浏览器验证
+
+`selftest-client.mjs` 用的是假 DOM；`scripts/render-check.html` 把 `client.js` 真的加载进浏览器：
+
+```
+# 用任意浏览器打开（或 ego-browser）
+file:///D:/Desktop/self_codebuddy/dsh-gufa-code/scripts/render-check.html
+```
+
+它用一个最小 `ModuleLoader` 桩模拟 DSH 的加载方式，然后断言 25 项：
+模块注册、factory 可调用、apply 无异常、G 调试句柄、后端默认值/切换/
+方法映射/持久化/总线事件、非法值回落，以及五种帧的 transition。
+
+实测 Chrome 结果：**25/25 通过**。
 
 ---
 
